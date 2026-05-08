@@ -25,6 +25,7 @@ export type HistoryItem = {
   n: number;
   images: string[];
   favorite: boolean;
+  durationMs?: number;
 };
 
 export const SIZE_OPTIONS: Size[] = [

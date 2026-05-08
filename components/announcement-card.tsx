@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Bell, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -9,11 +9,11 @@ import { Card } from "@/components/ui/card";
 const STORAGE_KEY = "image-2:announcement-dismissed";
 
 export function AnnouncementCard() {
-  const [hidden, setHidden] = useState(true);
-
-  useEffect(() => {
-    setHidden(window.localStorage.getItem(STORAGE_KEY) === "1");
-  }, []);
+  const [hidden, setHidden] = useState(
+    () =>
+      typeof window === "undefined" ||
+      window.localStorage.getItem(STORAGE_KEY) === "1",
+  );
 
   if (hidden) return null;
 

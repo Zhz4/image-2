@@ -1,12 +1,19 @@
 "use client";
 
-import type { HistoryItem } from "@/lib/types";
+import type { GenerateRequest, HistoryItem } from "@/lib/types";
 
+import { GeneratingCard } from "./generating-card";
 import { HistoryItemCard } from "./history-item-card";
 import type { HistoryFilter } from "./history-toolbar";
 
+export type GeneratingTask = {
+  id: string;
+  request: GenerateRequest;
+};
+
 type Props = {
   items: HistoryItem[];
+  generating: GeneratingTask[];
   filter: HistoryFilter;
   query: string;
   favoritesOnly: boolean;
@@ -18,6 +25,7 @@ type Props = {
 
 export function HistoryList({
   items,
+  generating,
   filter,
   query,
   favoritesOnly,
@@ -34,7 +42,7 @@ export function HistoryList({
     return true;
   });
 
-  if (filtered.length === 0) {
+  if (filtered.length === 0 && generating.length === 0) {
     return (
       <div className="flex min-h-40 flex-1 items-center justify-center rounded-xl border border-dashed text-sm text-muted-foreground">
         {items.length === 0
@@ -46,6 +54,9 @@ export function HistoryList({
 
   return (
     <div className="flex flex-1 flex-wrap content-start justify-start gap-3">
+      {generating.map((task) => (
+        <GeneratingCard key={task.id} request={task.request} />
+      ))}
       {filtered.map((item) => (
         <HistoryItemCard
           key={item.id}

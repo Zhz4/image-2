@@ -4,7 +4,7 @@ import { useState } from "react";
 
 import { AnnouncementCard } from "@/components/announcement-card";
 import { Composer } from "@/components/composer";
-import { HistoryList } from "@/components/history-list";
+import { HistoryList, type GeneratingTask } from "@/components/history-list";
 import {
   HistoryToolbar,
   type HistoryFilter,
@@ -25,6 +25,7 @@ export default function Home() {
     ComposerInitial | undefined
   >(undefined);
   const [composerKey, setComposerKey] = useState(0);
+  const [generating, setGenerating] = useState<GeneratingTask[]>([]);
 
   function loadIntoComposer(item: HistoryItem) {
     setComposerInitial({
@@ -37,8 +38,21 @@ export default function Home() {
     setComposerKey((k) => k + 1);
   }
 
+  function handleStart(taskId: string, request: GenerateRequest) {
+    setGenerating((prev) => [{ id: taskId, request }, ...prev]);
+  }
+
+  function handleSuccess(taskId: string, item: HistoryItem) {
+    setGenerating((prev) => prev.filter((t) => t.id !== taskId));
+    add(item);
+  }
+
+  function handleError(taskId: string) {
+    setGenerating((prev) => prev.filter((t) => t.id !== taskId));
+  }
+
   return (
-    <div className="mx-auto flex w-full max-w-[1250px] flex-1 flex-col gap-4 px-4 py-6 lg:px-6">
+    <div className="mx-auto flex w-full max-w-325 flex-1 flex-col gap-4 px-4 py-6 lg:px-6">
       <AnnouncementCard />
       <HistoryToolbar
         filter={filter}
@@ -50,6 +64,7 @@ export default function Home() {
       />
       <HistoryList
         items={items}
+        generating={generating}
         filter={filter}
         query={query}
         favoritesOnly={favoritesOnly}
@@ -62,7 +77,9 @@ export default function Home() {
         <Composer
           initial={composerInitial}
           resetKey={composerKey}
-          onGenerated={add}
+          onStart={handleStart}
+          onSuccess={handleSuccess}
+          onError={handleError}
         />
       </div>
     </div>

@@ -2,43 +2,31 @@
 
 import { useCallback, useEffect, useState } from "react";
 
+import { readHistoryStore, writeHistoryStore } from "@/lib/history-store";
 import type { HistoryItem } from "@/lib/types";
-
-const STORAGE_KEY = "image-2:history";
-
-function readStorage(): HistoryItem[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed as HistoryItem[];
-  } catch {
-    return [];
-  }
-}
-
-function writeStorage(items: HistoryItem[]) {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
-  } catch {
-    // quota or serialization error — silently drop; UI state still consistent
-  }
-}
 
 export function useHistory() {
   const [items, setItems] = useState<HistoryItem[]>([]);
   const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
-    setItems(readStorage());
-    setHydrated(true);
+    let cancelled = false;
+
+    readHistoryStore()
+      .then((stored) => {
+        if (!cancelled) setItems(stored);
+      })
+      .finally(() => {
+        if (!cancelled) setHydrated(true);
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const persist = useCallback((next: HistoryItem[]) => {
-    writeStorage(next);
+    void writeHistoryStore(next);
     return next;
   }, []);
 
