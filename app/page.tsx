@@ -38,7 +38,7 @@ export default function Home() {
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-4 px-4 py-6">
+    <div className="mx-auto flex w-full max-w-[1250px] flex-1 flex-col gap-4 px-4 py-6 lg:px-6">
       <AnnouncementCard />
       <HistoryToolbar
         filter={filter}
@@ -58,11 +58,13 @@ export default function Home() {
         onEdit={loadIntoComposer}
         onDelete={remove}
       />
-      <Composer
-        initial={composerInitial}
-        resetKey={composerKey}
-        onGenerated={add}
-      />
+      <div className="mx-auto w-full max-w-[865px]">
+        <Composer
+          initial={composerInitial}
+          resetKey={composerKey}
+          onGenerated={add}
+        />
+      </div>
     </div>
   );
 }

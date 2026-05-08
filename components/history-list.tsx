@@ -45,7 +45,7 @@ export function HistoryList({
   }
 
   return (
-    <div className="flex flex-1 flex-col gap-3">
+    <div className="flex flex-1 flex-wrap content-start justify-start gap-3">
       {filtered.map((item) => (
         <HistoryItemCard
           key={item.id}
