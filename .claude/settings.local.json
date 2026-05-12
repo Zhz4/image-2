@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "WebFetch(domain:betterstack.com)",
+      "WebFetch(domain:hono.dev)",
+      "WebFetch(domain:dev.to)"
+    ]
+  }
+}

@@ -1,36 +1,59 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Image 2
 
-## Getting Started
+OpenAI 兼容的图像生成工具。项目采用 Vue/Vite 前端和 Fastify 后端的前后端分离架构。
 
-First, run the development server:
+## 项目结构
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+```text
+image-2/
+├── backend/   # Fastify + TypeScript API
+└── frontend/  # Vue 3 + Vite + Element Plus 前端
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## 环境变量
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+后端读取 `backend/.env`：
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+OPENAI_API_KEY=
+OPENAI_BASE_URL=
+OPENAI_IMAGE_MODEL=
+OPENAI_REQUEST_TIMEOUT_MS=600000
+PORT=3002
+```
 
-## Learn More
+本地开发时请把密钥配置在 `backend/.env`。
 
-To learn more about Next.js, take a look at the following resources:
+## 开发
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+安装依赖：
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```bash
+pnpm install
+```
 
-## Deploy on Vercel
+同时启动前后端：
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+```bash
+pnpm dev
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+也可以分别启动：
+
+```bash
+pnpm dev:backend
+pnpm dev:frontend
+```
+
+默认端口：
+
+- 前端：`http://localhost:5173`
+- 后端：`http://localhost:3002`
+- 健康检查：`http://localhost:3002/health`
+
+## 构建与检查
+
+```bash
+pnpm lint
+pnpm build
+```
