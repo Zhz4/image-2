@@ -32,8 +32,13 @@
       <div
         class="pointer-events-none absolute left-2 top-2 z-10 flex items-center gap-1 rounded-sm bg-black/70 px-1.5 py-0.5 font-mono text-[11px] tabular-nums text-white shadow-sm"
       >
-        <span class="h-1.5 w-1.5 animate-pulse rounded-full bg-primary" />
-        {{ formatElapsed(elapsed) }}
+        <span
+          :class="[
+            'h-1.5 w-1.5 rounded-full',
+            isGenerating ? 'animate-pulse bg-primary' : 'bg-white/60',
+          ]"
+        />
+        {{ isGenerating ? formatElapsed(elapsed) : "等待中" }}
       </div>
 
       <div class="absolute inset-0 flex items-center justify-center">
@@ -56,11 +61,14 @@
     <div class="flex min-w-0 flex-1 flex-col px-3 py-3">
       <div class="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-primary">
         <span class="relative flex h-2 w-2">
-          <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary/70" />
+          <span
+            v-if="isGenerating"
+            class="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary/70"
+          />
           <span class="relative inline-flex h-2 w-2 rounded-full bg-primary" />
         </span>
-        Generating
-        <span ref="dotsRef" class="inline-flex gap-0.5">
+        {{ isGenerating ? "Generating" : "Waiting" }}
+        <span v-if="isGenerating" ref="dotsRef" class="inline-flex gap-0.5">
           <i class="inline-block h-1 w-1 rounded-full bg-primary opacity-40" />
           <i class="inline-block h-1 w-1 rounded-full bg-primary opacity-40" />
           <i class="inline-block h-1 w-1 rounded-full bg-primary opacity-40" />
@@ -89,11 +97,12 @@
 
 <script setup lang="ts">
 import gsap from "gsap";
-import { onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
-import type { GenerateRequest } from "@/lib/types";
+import { getGenerateQueueStatus } from "@/lib/api";
+import type { GenerateQueueStatus, GenerateRequest } from "@/lib/types";
 
-defineProps<{
+const props = defineProps<{
   request: GenerateRequest;
 }>();
 
@@ -106,9 +115,17 @@ const ringRef = ref<HTMLDivElement | null>(null);
 const dotsRef = ref<HTMLSpanElement | null>(null);
 const barsRef = ref<HTMLDivElement | null>(null);
 const elapsed = ref(0);
+const queueStatus = ref<GenerateQueueStatus | null>(null);
+const isGenerating = computed(
+  () => queueStatus.value?.status === "generating" || Boolean(generationStartedAt.value),
+);
+const generationStartedAt = computed(() => queueStatus.value?.generationStartedAt);
 
 let intervalId: number | undefined;
+let pollIntervalId: number | undefined;
 let ctx: gsap.Context | undefined;
+let ringTween: gsap.core.Tween | undefined;
+let statusController: AbortController | undefined;
 
 function formatElapsed(ms: number): string {
   const total = Math.floor(ms / 1000);
@@ -118,9 +135,15 @@ function formatElapsed(ms: number): string {
 }
 
 onMounted(() => {
-  const start = Date.now();
+  void refreshQueueStatus();
+  pollIntervalId = window.setInterval(() => {
+    void refreshQueueStatus();
+  }, 1000);
+
   intervalId = window.setInterval(() => {
-    elapsed.value = Date.now() - start;
+    elapsed.value = generationStartedAt.value
+      ? Date.now() - generationStartedAt.value
+      : 0;
   }, 1000);
 
   ctx = gsap.context(() => {
@@ -139,7 +162,7 @@ onMounted(() => {
       repeat: -1,
     });
 
-    gsap.to(ringRef.value, {
+    ringTween = gsap.to(ringRef.value, {
       rotate: 360,
       duration: 2.4,
       ease: "none",
@@ -199,8 +222,37 @@ onMounted(() => {
   }, rootRef.value ?? undefined);
 });
 
+async function refreshQueueStatus() {
+  const taskId = props.request.taskId;
+  if (!taskId) {
+    queueStatus.value = null;
+    return;
+  }
+
+  statusController?.abort();
+  statusController = new AbortController();
+  try {
+    const status = await getGenerateQueueStatus(taskId, statusController.signal);
+    if (status) queueStatus.value = status;
+  } catch (error) {
+    if (!(error instanceof DOMException && error.name === "AbortError")) {
+      window.clearInterval(pollIntervalId);
+    }
+  }
+}
+
+watch(isGenerating, (generating) => {
+  if (generating) {
+    ringTween?.play();
+  } else {
+    ringTween?.pause(0);
+  }
+});
+
 onBeforeUnmount(() => {
   if (intervalId) window.clearInterval(intervalId);
+  if (pollIntervalId) window.clearInterval(pollIntervalId);
+  statusController?.abort();
   ctx?.revert();
 });
 </script>

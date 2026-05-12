@@ -3,6 +3,7 @@ export type Quality = "auto" | "low" | "medium" | "high";
 export type Format = "png" | "jpeg" | "webp";
 
 export type GenerateRequest = {
+  taskId?: string;
   prompt: string;
   size: Size;
   quality: Quality;
@@ -20,6 +21,9 @@ export type ReferenceImage = {
 export type GenerateResponse = {
   images: { src: string }[];
   created: number;
+  queuedAt?: number;
+  generationStartedAt?: number;
+  completedAt?: number;
 };
 
 export type HistoryItem = {

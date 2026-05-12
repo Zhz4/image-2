@@ -2,6 +2,11 @@ import type { FastifyInstance } from "fastify";
 import { toFile } from "openai";
 import type { Images } from "openai/resources/images";
 
+import {
+  addTrackedImageGeneration,
+  createImageQueueTask,
+  getImageQueueTask,
+} from "../lib/image-queue.js";
 import { getImageModel, getOpenAI } from "../lib/openai.js";
 import {
   FORMAT_OPTIONS,
@@ -31,6 +36,7 @@ const SUPPORTED_REFERENCE_TYPES = new Set([
 ]);
 
 function normalizeRequest(body: GenerateBody): GenerateRequest | { error: string } {
+  const taskId = typeof body.taskId === "string" ? body.taskId.trim() : undefined;
   const prompt = typeof body.prompt === "string" ? body.prompt.trim() : "";
   if (!prompt) {
     return { error: "prompt is required" };
@@ -56,7 +62,7 @@ function normalizeRequest(body: GenerateBody): GenerateRequest | { error: string
       ? Math.floor(body.n)
       : 1;
 
-  return { prompt, size, quality, format, n };
+  return { taskId, prompt, size, quality, format, n };
 }
 
 function normalizeReferenceImages(
@@ -110,7 +116,25 @@ function imageSourceToDataUrl(data: Images.Image, mime: string): string | null {
   return null;
 }
 
+async function enqueueImageGeneration(
+  taskId: string | undefined,
+  task: () => Promise<Images.ImagesResponse>,
+): Promise<Images.ImagesResponse> {
+  return addTrackedImageGeneration(taskId, task);
+}
+
 export async function generateRoutes(app: FastifyInstance) {
+  app.get<{ Params: { taskId: string } }>(
+    "/api/generate/status/:taskId",
+    async (request, reply) => {
+      const task = getImageQueueTask(request.params.taskId);
+      if (!task) {
+        return reply.status(404).send({ error: "task not found" });
+      }
+      return reply.send(task);
+    },
+  );
+
   app.post<{ Body: GenerateBody }>("/api/generate", async (request, reply) => {
     const normalized = normalizeRequest(request.body ?? {});
     if ("error" in normalized) {
@@ -127,48 +151,51 @@ export async function generateRoutes(app: FastifyInstance) {
       const mime =
         normalized.format === "jpeg" ? "image/jpeg" : `image/${normalized.format}`;
       const responses: Images.ImagesResponse[] = [];
+      createImageQueueTask(normalized.taskId ?? request.id, normalized.n);
+      const queueTaskId = normalized.taskId ?? request.id;
 
       if (referenceImages.length > 0) {
-        const uploadables = await Promise.all(
-          referenceImages.map((image) =>
-            toFile(image.buffer, image.name, { type: image.type }),
-          ),
+        responses.push(
+          ...(await Promise.all(
+            Array.from({ length: normalized.n }, async () => {
+              const uploadables = await Promise.all(
+                referenceImages.map((image) =>
+                  toFile(image.buffer, image.name, { type: image.type }),
+                ),
+              );
+              const editParams: Images.ImageEditParamsNonStreaming = {
+                image: uploadables,
+                model,
+                prompt: normalized.prompt,
+                size: normalized.size,
+                n: 1,
+                quality: normalized.quality,
+                output_format: normalized.format,
+              };
+              return enqueueImageGeneration(queueTaskId, () =>
+                openai.images.edit(editParams),
+              );
+            }),
+          )),
         );
-        const editParams: Images.ImageEditParamsNonStreaming = {
-          image: uploadables,
-          model,
-          prompt: normalized.prompt,
-          size: normalized.size,
-          n: normalized.n,
-          quality: normalized.quality,
-          output_format: normalized.format,
-        };
-        responses.push(await openai.images.edit(editParams));
       } else {
         const requestParams: Images.ImageGenerateParamsNonStreaming = {
           model,
           prompt: normalized.prompt,
           size: normalized.size,
-          n: normalized.n,
+          n: 1,
           quality: normalized.quality,
           output_format: normalized.format,
         };
-        responses.push(await openai.images.generate(requestParams));
-
-        const imageCount = () =>
-          responses.reduce(
-            (total, response) => total + (response.data?.length ?? 0),
-            0,
-          );
-
-        while (imageCount() < normalized.n && responses.length < normalized.n) {
-          responses.push(
-            await openai.images.generate({
-              ...requestParams,
-              n: normalized.n - imageCount(),
-            }),
-          );
-        }
+        responses.push(
+          ...(await Promise.all(
+            Array.from({ length: normalized.n }, () =>
+              enqueueImageGeneration(queueTaskId, () =>
+                openai.images.generate(requestParams),
+              ),
+            ),
+          )),
+        );
       }
 
       const sources = responses
@@ -185,6 +212,12 @@ export async function generateRoutes(app: FastifyInstance) {
         images: sources.map((src) => ({ src })),
         created: responses[0]?.created ?? Math.floor(Date.now() / 1000),
       };
+      const queueTask = getImageQueueTask(queueTaskId);
+      if (queueTask) {
+        payload.queuedAt = queueTask.queuedAt;
+        payload.generationStartedAt = queueTask.generationStartedAt;
+        payload.completedAt = queueTask.completedAt;
+      }
       return reply.send(payload);
     } catch (e: unknown) {
       const err = e as {

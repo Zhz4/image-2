@@ -406,6 +406,7 @@ async function handleSubmit() {
   const taskId = makeId();
   const request: GenerateRequest = {
     ...form,
+    taskId,
     prompt: form.prompt.trim(),
     referenceImages:
       referenceImages.value.length > 0 ? [...referenceImages.value] : undefined,
@@ -430,6 +431,10 @@ async function handleSubmit() {
   const timeoutId = window.setTimeout(() => controller.abort(), CLIENT_TIMEOUT_MS);
   try {
     const json = await generateImages(request, controller.signal);
+    const durationMs =
+      json.generationStartedAt && json.completedAt
+        ? json.completedAt - json.generationStartedAt
+        : Date.now() - startedAt;
     const item: HistoryItem = {
       id: makeId(),
       createdAt: Date.now(),
@@ -441,7 +446,7 @@ async function handleSubmit() {
       images: json.images.map((img) => img.src),
       referenceImages: request.referenceImages,
       favorite: false,
-      durationMs: Date.now() - startedAt,
+      durationMs,
     };
     emit("success", taskId, item);
   } catch (e) {
