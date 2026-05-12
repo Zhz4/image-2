@@ -84,7 +84,8 @@ function handleSuccess(taskId: string, item: HistoryItem) {
   add(item);
 }
 
-function handleError(taskId: string) {
+function handleError(taskId: string, item: HistoryItem) {
   generating.value = generating.value.filter((task) => task.id !== taskId);
+  add(item);
 }
 </script>

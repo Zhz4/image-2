@@ -33,6 +33,8 @@ export type HistoryItem = {
   images: string[];
   referenceImages?: ReferenceImage[];
   favorite: boolean;
+  status?: "success" | "failed";
+  errorMessage?: string;
   durationMs?: number;
 };
 

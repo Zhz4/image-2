@@ -3,8 +3,24 @@
     class="flex h-40 w-full max-w-[404px] gap-0 overflow-hidden rounded-lg border bg-card py-0 text-card-foreground shadow-xs sm:w-[404px]"
   >
     <div class="relative h-full w-40 shrink-0 bg-muted">
+      <el-tooltip
+        v-if="isFailed"
+        :content="failureReason"
+        placement="top"
+        effect="dark"
+      >
+        <div
+          class="flex h-full w-full flex-col items-center justify-center gap-2 bg-destructive/10 px-3 text-center text-destructive"
+        >
+          <el-icon class="size-7"><CircleClose /></el-icon>
+          <div class="text-sm font-medium">生图失败</div>
+          <div class="line-clamp-2 text-xs text-destructive/80">
+            {{ failureReason }}
+          </div>
+        </div>
+      </el-tooltip>
       <button
-        v-if="cover"
+        v-else-if="cover"
         type="button"
         class="grid h-full w-full cursor-zoom-in grid-cols-2 gap-px bg-background/40 text-left"
         title="打开预览"
@@ -42,6 +58,12 @@
           class="rounded-sm bg-black/70 px-1.5 py-0 text-[10px] text-white shadow-none"
         >
           ×{{ item.images.length }}
+        </span>
+        <span
+          v-if="isFailed"
+          class="rounded-sm bg-red-600/90 px-1.5 py-0 text-[10px] text-white shadow-none"
+        >
+          失败
         </span>
       </div>
       <div
@@ -123,6 +145,7 @@
     </div>
 
     <el-dialog
+      v-if="!isFailed"
       v-model="previewOpen"
       align-center
       append-to-body
@@ -134,11 +157,16 @@
         <div
           class="relative flex min-h-[320px] shrink-0 flex-col items-center justify-center gap-3 bg-muted p-4 md:w-1/2"
         >
-          <img
+          <el-image
             v-if="active"
             :src="active"
             :alt="item.prompt"
-            class="max-h-[70vh] max-w-full rounded-md object-contain"
+            :preview-src-list="item.images"
+            :initial-index="safeIndex"
+            fit="contain"
+            preview-teleported
+            hide-on-click-modal
+            class="history-main-image"
             @load="setNaturalSize"
           />
           <div v-if="item.images.length > 1" class="flex max-w-full gap-1.5 overflow-x-auto pb-1">
@@ -223,12 +251,17 @@
             <div v-if="referenceImages.length > 0" class="mt-5">
               <div class="text-xs font-medium text-muted-foreground">Refs</div>
               <div class="mt-2 flex gap-2 overflow-x-auto rounded-lg border bg-muted/40 p-2">
-                <img
+                <el-image
                   v-for="(image, index) in referenceImages"
                   :key="`${item.id}-reference-${index}`"
                   :src="image.dataUrl"
                   :alt="image.name || `Reference ${index + 1}`"
-                  class="h-16 w-16 shrink-0 rounded-md object-cover"
+                  :preview-src-list="referencePreviewList"
+                  :initial-index="index"
+                  fit="cover"
+                  preview-teleported
+                  hide-on-click-modal
+                  class="history-reference-image"
                 />
               </div>
             </div>
@@ -302,6 +335,7 @@
 <script setup lang="ts">
 import {
   Check,
+  CircleClose,
   Close,
   CopyDocument,
   Delete,
@@ -337,6 +371,11 @@ const safeIndex = computed(() =>
 );
 const active = computed(() => item.value.images[safeIndex.value] ?? cover.value);
 const referenceImages = computed(() => item.value.referenceImages ?? []);
+const referencePreviewList = computed(() =>
+  referenceImages.value.map((image) => image.dataUrl),
+);
+const isFailed = computed(() => item.value.status === "failed");
+const failureReason = computed(() => item.value.errorMessage || "生成失败");
 const dimensionDisplay = computed(() =>
   item.value.size !== "auto"
     ? dimensionLabel(item.value.size)

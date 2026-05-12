@@ -32,6 +32,8 @@ export type HistoryItem = {
   n: number;
   images: string[];
   favorite: boolean;
+  status?: "success" | "failed";
+  errorMessage?: string;
   durationMs?: number;
 };
 

@@ -242,7 +242,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   start: [taskId: string, request: GenerateRequest];
   success: [taskId: string, item: HistoryItem];
-  error: [taskId: string, message: string];
+  error: [taskId: string, item: HistoryItem];
 }>();
 
 const DEFAULT_VALUES: GenerateRequest = {
@@ -451,8 +451,23 @@ async function handleSubmit() {
         : e instanceof Error
           ? e.message
           : "生成失败";
+    const item: HistoryItem = {
+      id: makeId(),
+      createdAt: Date.now(),
+      prompt: request.prompt,
+      size: request.size,
+      quality: request.quality,
+      format: request.format,
+      n: request.n,
+      images: [],
+      referenceImages: request.referenceImages,
+      favorite: false,
+      status: "failed",
+      errorMessage: msg,
+      durationMs: Date.now() - startedAt,
+    };
     error.value = msg;
-    emit("error", taskId, msg);
+    emit("error", taskId, item);
   } finally {
     window.clearTimeout(timeoutId);
   }
