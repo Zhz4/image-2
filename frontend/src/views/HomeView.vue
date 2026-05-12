@@ -1,5 +1,5 @@
 <template>
-  <main class="mx-auto flex min-h-dvh w-full max-w-325 flex-col gap-4 px-4 pb-64 pt-6 sm:pb-52 lg:px-6">
+  <main class="mx-auto flex min-h-dvh w-full max-w-325 flex-col gap-4 px-4 pb-80 pt-6 sm:pb-68 lg:px-6">
     <AnnouncementCard />
     <HistoryToolbar
       v-model:filter="filter"
@@ -68,6 +68,9 @@ function loadIntoComposer(item: HistoryItem) {
     quality: item.quality,
     format: item.format,
     n: item.n,
+    referenceImages: item.referenceImages
+      ? item.referenceImages.map((image) => ({ ...image }))
+      : undefined,
   };
   composerKey.value += 1;
 }

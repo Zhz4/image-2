@@ -42,6 +42,32 @@
       <div
         class="relative overflow-hidden rounded-2xl border bg-background/85 backdrop-blur-xl supports-backdrop-filter:bg-background/65"
       >
+        <div
+          v-if="referenceImages.length > 0"
+          class="flex gap-2 overflow-x-auto border-b border-border/60 px-4 py-3"
+        >
+          <div
+            v-for="(image, index) in referenceImages"
+            :key="`${image.name}-${index}`"
+            class="group/reference relative h-16 w-16 shrink-0 overflow-hidden rounded-md border bg-muted"
+          >
+            <img
+              :src="image.dataUrl"
+              :alt="image.name"
+              class="h-full w-full object-cover"
+            />
+            <button
+              type="button"
+              class="absolute right-1 top-1 inline-flex size-5 items-center justify-center rounded-sm bg-black/70 text-white opacity-0 transition-opacity group-hover/reference:opacity-100"
+              title="移除参考图"
+              @click="removeReferenceImage(index)"
+            >
+              <el-icon class="size-3"><Close /></el-icon>
+              <span class="sr-only">移除参考图</span>
+            </button>
+          </div>
+        </div>
+
         <div class="relative px-4 pb-2 pt-4">
           <div class="flex items-start gap-2">
             <el-icon
@@ -69,11 +95,11 @@
             class="pointer-events-none absolute right-4 top-3 flex items-center gap-1 text-[10px] uppercase tracking-wider text-muted-foreground/50 opacity-0 transition-opacity duration-300 group-focus-within/composer:opacity-100"
           >
             <kbd class="rounded border bg-muted/40 px-1.5 py-0.5 font-mono text-[10px]">
-              ⌘
+              Ctrl
             </kbd>
             <span>+</span>
             <kbd class="rounded border bg-muted/40 px-1.5 py-0.5 font-mono text-[10px]">
-              ↵
+              Enter
             </kbd>
           </div>
         </div>
@@ -121,15 +147,23 @@
             <el-button
               circle
               text
-              disabled
-              title="附件功能暂未开放"
-              class="group/attach !text-muted-foreground/70 transition-all disabled:opacity-50"
+              title="添加参考图"
+              class="group/attach !text-muted-foreground/70 transition-all"
+              @click="fileInputRef?.click()"
             >
               <el-icon>
                 <Paperclip class="transition-transform duration-300 group-hover/attach:-rotate-12 group-hover/attach:scale-110" />
               </el-icon>
-              <span class="sr-only">附件</span>
+              <span class="sr-only">添加参考图</span>
             </el-button>
+            <input
+              ref="fileInputRef"
+              class="sr-only"
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              multiple
+              @change="handleReferenceFiles"
+            />
 
             <button
               ref="sendRef"
@@ -142,7 +176,7 @@
                   ? 'bg-linear-to-br from-fuchsia-500 via-violet-500 to-sky-500 text-white shadow-[0_4px_20px_-4px_rgba(168,85,247,0.6)] hover:-translate-y-0.5 hover:shadow-[0_6px_28px_-2px_rgba(168,85,247,0.75)] active:translate-y-0 active:scale-95'
                   : 'cursor-not-allowed bg-muted text-muted-foreground/50',
               ]"
-              :title="canSubmit ? '生成（⌘ + ↵）' : '请输入提示词'"
+              :title="canSubmit ? '生成（Ctrl + Enter）' : '请输入提示词'"
               @click="handleSubmit"
             >
               <span
@@ -183,7 +217,7 @@
 </template>
 
 <script setup lang="ts">
-import { MagicStick, Paperclip, Top } from "@element-plus/icons-vue";
+import { Close, MagicStick, Paperclip, Top } from "@element-plus/icons-vue";
 import gsap from "gsap";
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 
@@ -195,6 +229,7 @@ import {
   SIZE_OPTIONS,
   type GenerateRequest,
   type HistoryItem,
+  type ReferenceImage,
 } from "@/lib/types";
 
 type Initial = Partial<Omit<GenerateRequest, "prompt">> & { prompt?: string };
@@ -218,13 +253,19 @@ const DEFAULT_VALUES: GenerateRequest = {
   n: 1,
 };
 const CLIENT_TIMEOUT_MS = 10 * 60 * 1000 + 10_000;
+const MAX_REFERENCE_IMAGES = 4;
+const MAX_REFERENCE_IMAGE_BYTES = 10 * 1024 * 1024;
 
 const form = reactive<GenerateRequest>(makeInitial(props.initial));
 const error = ref<string | null>(null);
 const focused = ref(false);
+const referenceImages = ref<ReferenceImage[]>(
+  props.initial?.referenceImages ? [...props.initial.referenceImages] : [],
+);
 
 const rootRef = ref<HTMLDivElement | null>(null);
 const auraRef = ref<HTMLDivElement | null>(null);
+const fileInputRef = ref<HTMLInputElement | null>(null);
 const sendRef = ref<HTMLButtonElement | null>(null);
 const sendShineRef = ref<HTMLSpanElement | null>(null);
 const sparkleRef = ref<unknown>(null);
@@ -240,6 +281,9 @@ function makeInitial(initial?: Initial): GenerateRequest {
     quality: initial?.quality ?? DEFAULT_VALUES.quality,
     format: initial?.format ?? DEFAULT_VALUES.format,
     n: initial?.n ?? DEFAULT_VALUES.n,
+    referenceImages: initial?.referenceImages
+      ? [...initial.referenceImages]
+      : undefined,
   };
 }
 
@@ -250,8 +294,69 @@ function makeId(): string {
 }
 
 function resetForm() {
-  Object.assign(form, makeInitial(props.initial));
+  const next = makeInitial(props.initial);
+  Object.assign(form, next);
+  referenceImages.value = next.referenceImages ? [...next.referenceImages] : [];
   error.value = null;
+}
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error);
+    reader.onload = () => {
+      if (typeof reader.result === "string") {
+        resolve(reader.result);
+      } else {
+        reject(new Error("无法读取参考图"));
+      }
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+async function handleReferenceFiles(e: Event) {
+  const input = e.currentTarget as HTMLInputElement;
+  const files = Array.from(input.files ?? []);
+  input.value = "";
+  if (files.length === 0) return;
+
+  const remainingSlots = Math.max(
+    MAX_REFERENCE_IMAGES - referenceImages.value.length,
+    0,
+  );
+  if (remainingSlots === 0) {
+    error.value = `最多添加 ${MAX_REFERENCE_IMAGES} 张参考图`;
+    return;
+  }
+
+  const allowedTypes = new Set(["image/png", "image/jpeg", "image/webp"]);
+  const next: ReferenceImage[] = [];
+
+  for (const file of files.slice(0, remainingSlots)) {
+    if (!allowedTypes.has(file.type)) {
+      error.value = "参考图仅支持 PNG、JPG、WEBP";
+      continue;
+    }
+    if (file.size > MAX_REFERENCE_IMAGE_BYTES) {
+      error.value = "单张参考图不能超过 10MB";
+      continue;
+    }
+    next.push({
+      name: file.name,
+      type: file.type,
+      dataUrl: await readFileAsDataUrl(file),
+    });
+  }
+
+  if (files.length > remainingSlots) {
+    error.value = `最多添加 ${MAX_REFERENCE_IMAGES} 张参考图`;
+  }
+  referenceImages.value = [...referenceImages.value, ...next];
+}
+
+function removeReferenceImage(index: number) {
+  referenceImages.value = referenceImages.value.filter((_, i) => i !== index);
 }
 
 function playSendShine() {
@@ -299,7 +404,12 @@ async function handleSubmit() {
   if (!canSubmit.value) return;
   error.value = null;
   const taskId = makeId();
-  const request: GenerateRequest = { ...form, prompt: form.prompt.trim() };
+  const request: GenerateRequest = {
+    ...form,
+    prompt: form.prompt.trim(),
+    referenceImages:
+      referenceImages.value.length > 0 ? [...referenceImages.value] : undefined,
+  };
 
   if (sendRef.value) {
     gsap.fromTo(
@@ -313,6 +423,7 @@ async function handleSubmit() {
 
   emit("start", taskId, request);
   form.prompt = "";
+  referenceImages.value = [];
 
   const startedAt = Date.now();
   const controller = new AbortController();
@@ -328,6 +439,7 @@ async function handleSubmit() {
       format: request.format,
       n: request.n,
       images: json.images.map((img) => img.src),
+      referenceImages: request.referenceImages,
       favorite: false,
       durationMs: Date.now() - startedAt,
     };

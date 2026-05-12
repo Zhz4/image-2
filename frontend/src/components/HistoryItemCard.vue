@@ -69,6 +69,12 @@
         <span class="rounded-sm bg-secondary px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground">
           ×{{ item.n }}
         </span>
+        <span
+          v-if="referenceImages.length > 0"
+          class="rounded-sm bg-secondary px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground"
+        >
+          Refs x{{ referenceImages.length }}
+        </span>
       </div>
       <div class="flex items-center justify-end gap-0.5 pt-2">
         <el-button
@@ -214,6 +220,19 @@
               <ParamField label="数量" :value="`${item.n}`" />
             </div>
 
+            <div v-if="referenceImages.length > 0" class="mt-5">
+              <div class="text-xs font-medium text-muted-foreground">Refs</div>
+              <div class="mt-2 flex gap-2 overflow-x-auto rounded-lg border bg-muted/40 p-2">
+                <img
+                  v-for="(image, index) in referenceImages"
+                  :key="`${item.id}-reference-${index}`"
+                  :src="image.dataUrl"
+                  :alt="image.name || `Reference ${index + 1}`"
+                  class="h-16 w-16 shrink-0 rounded-md object-cover"
+                />
+              </div>
+            </div>
+
             <div class="mt-4 text-xs text-muted-foreground">
               创建于 {{ formatCreatedAt(item.createdAt) }}
               <span v-if="item.durationMs != null">
@@ -317,6 +336,7 @@ const safeIndex = computed(() =>
   Math.min(activeIndex.value, Math.max(item.value.images.length - 1, 0)),
 );
 const active = computed(() => item.value.images[safeIndex.value] ?? cover.value);
+const referenceImages = computed(() => item.value.referenceImages ?? []);
 const dimensionDisplay = computed(() =>
   item.value.size !== "auto"
     ? dimensionLabel(item.value.size)

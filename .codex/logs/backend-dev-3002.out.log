@@ -15,3 +15,11 @@
 {"level":30,"time":1778568699471,"pid":26336,"hostname":"CHINAMI-A1102C","reqId":"req-4","res":{"statusCode":524},"responseTime":125564.57450000197,"msg":"request completed"}
 {"level":30,"time":1778580979676,"pid":26336,"hostname":"CHINAMI-A1102C","reqId":"req-5","req":{"method":"POST","url":"/api/generate","host":"localhost:3002","remoteAddress":"127.0.0.1","remotePort":50286},"msg":"incoming request"}
 {"level":30,"time":1778581187959,"pid":26336,"hostname":"CHINAMI-A1102C","reqId":"req-5","res":{"statusCode":200},"responseTime":208282.45700000226,"msg":"request completed"}
+18:45:34 [tsx] change in ./src\types\index.ts Restarting...
+c{"level":50,"time":1778582737348,"pid":7740,"hostname":"CHINAMI-A1102C","err":{"type":"Error","message":"listen EADDRINUSE: address already in use 0.0.0.0:3110","stack":"Error: listen EADDRINUSE: address already in use 0.0.0.0:3110\n    at Server.setupListenHandle [as _listen2] (node:net:1940:16)\n    at listenInCluster (node:net:1997:12)\n    at node:net:2206:7\n    at process.processTicksAndRejections (node:internal/process/task_queues:89:21)","code":"EADDRINUSE","errno":-4091,"syscall":"listen","address":"0.0.0.0","port":3110},"msg":"listen EADDRINUSE: address already in use 0.0.0.0:3110"}
+18:53:03 [tsx] change in ./src\routes\generate.ts Rerunning...
+c{"level":30,"time":1778583184806,"pid":19152,"hostname":"CHINAMI-A1102C","msg":"Server listening at http://127.0.0.1:3110"}
+{"level":30,"time":1778583184807,"pid":19152,"hostname":"CHINAMI-A1102C","msg":"Server listening at http://192.168.2.59:3110"}
+{"level":30,"time":1778583184807,"pid":19152,"hostname":"CHINAMI-A1102C","msg":"Server listening at http://172.28.64.1:3110"}
+{"level":30,"time":1778583333766,"pid":19152,"hostname":"CHINAMI-A1102C","reqId":"req-1","req":{"method":"POST","url":"/api/generate","host":"localhost:3110","remoteAddress":"127.0.0.1","remotePort":53109},"msg":"incoming request"}
+{"level":30,"time":1778583414182,"pid":19152,"hostname":"CHINAMI-A1102C","reqId":"req-1","res":{"statusCode":200},"responseTime":80415.20480000228,"msg":"request completed"}

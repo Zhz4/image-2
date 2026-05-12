@@ -8,6 +8,13 @@ export type GenerateRequest = {
   quality: Quality;
   format: Format;
   n: number;
+  referenceImages?: ReferenceImage[];
+};
+
+export type ReferenceImage = {
+  name: string;
+  type: string;
+  dataUrl: string;
 };
 
 export type GenerateResponse = {

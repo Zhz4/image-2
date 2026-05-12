@@ -5,7 +5,7 @@ import { defineConfig, type ProxyOptions } from "vite";
 
 const apiProxy: Record<string, string | ProxyOptions> = {
   "/api": {
-    target: "http://localhost:3110",
+    target: "http://localhost:3112",
     changeOrigin: true,
   },
 };
