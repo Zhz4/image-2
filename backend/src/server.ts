@@ -1,4 +1,5 @@
 import cors from "@fastify/cors";
+import websocket from "@fastify/websocket";
 import dotenv from "dotenv";
 import Fastify from "fastify";
 import type { FastifyError } from "fastify";
@@ -14,6 +15,7 @@ const app = Fastify({
 await app.register(cors, {
   origin: true,
 });
+await app.register(websocket);
 
 app.setErrorHandler((error: FastifyError, request, reply) => {
   if (error.statusCode === 400 && error.code === "FST_ERR_CTP_INVALID_JSON_BODY") {

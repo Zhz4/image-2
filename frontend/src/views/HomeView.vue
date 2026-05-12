@@ -26,8 +26,6 @@
           :initial="composerInitial"
           :reset-key="composerKey"
           @start="handleStart"
-          @success="handleSuccess"
-          @error="handleError"
         />
       </div>
     </div>
@@ -35,15 +33,17 @@
 </template>
 
 <script setup lang="ts">
-import { ref, shallowRef } from "vue";
+import { onBeforeUnmount, ref, shallowRef } from "vue";
 
 import AnnouncementCard from "@/components/AnnouncementCard.vue";
 import Composer from "@/components/Composer.vue";
 import HistoryList from "@/components/HistoryList.vue";
 import HistoryToolbar from "@/components/HistoryToolbar.vue";
 import { useHistory } from "@/composables/use-history";
+import { connectGenerateTask } from "@/lib/api";
 import type {
   GenerateRequest,
+  GenerateTaskMessage,
   GeneratingTask,
   HistoryFilter,
   HistoryItem,
@@ -60,6 +60,7 @@ const favoritesOnly = ref(false);
 const composerInitial = shallowRef<ComposerInitial | undefined>(undefined);
 const composerKey = ref(0);
 const generating = ref<GeneratingTask[]>([]);
+const sockets = new Map<string, WebSocket>();
 
 function loadIntoComposer(item: HistoryItem) {
   composerInitial.value = {
@@ -77,15 +78,110 @@ function loadIntoComposer(item: HistoryItem) {
 
 function handleStart(taskId: string, request: GenerateRequest) {
   generating.value = [{ id: taskId, request }, ...generating.value];
+  connectTask(taskId, request);
 }
 
-function handleSuccess(taskId: string, item: HistoryItem) {
+function makeId(): string {
+  return typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function updateGeneratingTask(taskId: string, message: GenerateTaskMessage) {
+  generating.value = generating.value.map((task) =>
+    task.id === taskId
+      ? {
+          ...task,
+          status: message.status,
+          total: message.total,
+          completed: message.completed,
+          active: message.active,
+          queuedAt: message.queuedAt,
+          generationStartedAt: message.generationStartedAt,
+        }
+      : task,
+  );
+}
+
+function finishTask(taskId: string, item: HistoryItem) {
   generating.value = generating.value.filter((task) => task.id !== taskId);
+  sockets.get(taskId)?.close();
+  sockets.delete(taskId);
   add(item);
 }
 
-function handleError(taskId: string, item: HistoryItem) {
-  generating.value = generating.value.filter((task) => task.id !== taskId);
-  add(item);
+function connectTask(taskId: string, request: GenerateRequest) {
+  sockets.get(taskId)?.close();
+  const socket = connectGenerateTask(taskId, {
+    onMessage: (message) => {
+      updateGeneratingTask(taskId, message);
+      if (message.status === "completed" && "images" in message) {
+        finishTask(taskId, {
+          id: makeId(),
+          createdAt: Date.now(),
+          prompt: request.prompt,
+          size: request.size,
+          quality: request.quality,
+          format: request.format,
+          n: request.n,
+          images: message.images.map((image) => image.src),
+          referenceImages: request.referenceImages,
+          favorite: false,
+          durationMs:
+            message.generationStartedAt && message.completedAt
+              ? message.completedAt - message.generationStartedAt
+              : undefined,
+        });
+      }
+
+      if (message.status === "failed") {
+        finishTask(taskId, {
+          id: makeId(),
+          createdAt: Date.now(),
+          prompt: request.prompt,
+          size: request.size,
+          quality: request.quality,
+          format: request.format,
+          n: request.n,
+          images: [],
+          referenceImages: request.referenceImages,
+          favorite: false,
+          status: "failed",
+          errorMessage: "error" in message ? message.error : "生成失败",
+          durationMs:
+            message.generationStartedAt && message.failedAt
+              ? message.failedAt - message.generationStartedAt
+              : undefined,
+        });
+      }
+    },
+    onError: () => {
+      finishTask(taskId, {
+        id: makeId(),
+        createdAt: Date.now(),
+        prompt: request.prompt,
+        size: request.size,
+        quality: request.quality,
+        format: request.format,
+        n: request.n,
+        images: [],
+        referenceImages: request.referenceImages,
+        favorite: false,
+        status: "failed",
+        errorMessage: "WebSocket 连接失败",
+      });
+    },
+    onClose: () => {
+      sockets.delete(taskId);
+    },
+  });
+  sockets.set(taskId, socket);
 }
+
+onBeforeUnmount(() => {
+  for (const socket of sockets.values()) {
+    socket.close();
+  }
+  sockets.clear();
+});
 </script>

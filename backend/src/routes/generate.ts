@@ -4,8 +4,11 @@ import type { Images } from "openai/resources/images";
 
 import {
   addTrackedImageGeneration,
+  completeImageQueueTask,
   createImageQueueTask,
+  failImageQueueTask,
   getImageQueueTask,
+  subscribeImageQueueTask,
 } from "../lib/image-queue.js";
 import { getImageModel, getOpenAI } from "../lib/openai.js";
 import {
@@ -14,7 +17,6 @@ import {
   SIZE_OPTIONS,
   type Format,
   type GenerateRequest,
-  type GenerateResponse,
   type Quality,
   type ReferenceImage,
   type Size,
@@ -123,7 +125,160 @@ async function enqueueImageGeneration(
   return addTrackedImageGeneration(taskId, task);
 }
 
+function getErrorMessage(e: unknown): string {
+  const err = e as {
+    name?: string;
+    message?: string;
+    error?: { message?: string };
+  };
+  const isTimeout =
+    err.name === "APIConnectionTimeoutError" ||
+    (typeof err.message === "string" &&
+      err.message.toLowerCase().includes("timed out"));
+  return isTimeout
+    ? "Image generation timed out. Try again, or increase OPENAI_REQUEST_TIMEOUT_MS."
+    : err.error?.message ?? err.message ?? "image generation failed";
+}
+
+function sendTask(socket: { send: (data: string) => void }, taskId: string) {
+  const task = getImageQueueTask(taskId);
+  if (!task) {
+    socket.send(
+      JSON.stringify({
+        id: taskId,
+        status: "failed",
+        total: 0,
+        completed: 0,
+        active: 0,
+        queuedAt: Date.now(),
+        failedAt: Date.now(),
+        error: "task not found",
+      }),
+    );
+    return false;
+  }
+
+  socket.send(
+    JSON.stringify({
+      ...task,
+      error: task.errorMessage,
+      images: task.result?.images,
+      created: task.result?.created,
+    }),
+  );
+  return task.status !== "completed" && task.status !== "failed";
+}
+
+async function runImageGenerationTask(
+  taskId: string,
+  normalized: GenerateRequest,
+  referenceImages: NormalizedReferenceImage[],
+) {
+  try {
+    const openai = getOpenAI();
+    const model = getImageModel();
+    const mime =
+      normalized.format === "jpeg" ? "image/jpeg" : `image/${normalized.format}`;
+    const responses: Images.ImagesResponse[] = [];
+
+    if (referenceImages.length > 0) {
+      responses.push(
+        ...(await Promise.all(
+          Array.from({ length: normalized.n }, async () => {
+            const uploadables = await Promise.all(
+              referenceImages.map((image) =>
+                toFile(image.buffer, image.name, { type: image.type }),
+              ),
+            );
+            const editParams: Images.ImageEditParamsNonStreaming = {
+              image: uploadables,
+              model,
+              prompt: normalized.prompt,
+              size: normalized.size,
+              n: 1,
+              quality: normalized.quality,
+              output_format: normalized.format,
+              response_format: "url",
+              stream: false,
+            };
+            return enqueueImageGeneration(taskId, () => openai.images.edit(editParams));
+          }),
+        )),
+      );
+    } else {
+      const requestParams: Images.ImageGenerateParamsNonStreaming = {
+        model,
+        prompt: normalized.prompt,
+        size: normalized.size,
+        n: 1,
+        quality: normalized.quality,
+        output_format: normalized.format,
+        response_format: "url",
+        stream: false,
+      };
+      responses.push(
+        ...(await Promise.all(
+          Array.from({ length: normalized.n }, () =>
+            enqueueImageGeneration(taskId, () =>
+              openai.images.generate(requestParams),
+            ),
+          ),
+        )),
+      );
+    }
+
+    const sources = responses
+      .flatMap((response) => response.data ?? [])
+      .map((data) => imageSourceToDataUrl(data, mime))
+      .filter((source): source is string => Boolean(source))
+      .slice(0, normalized.n);
+
+    if (sources.length === 0) {
+      failImageQueueTask(taskId, "model returned no images");
+      return;
+    }
+
+    completeImageQueueTask(taskId, {
+      images: sources.map((src) => ({ src })),
+      created: responses[0]?.created ?? Math.floor(Date.now() / 1000),
+    });
+  } catch (e: unknown) {
+    failImageQueueTask(taskId, getErrorMessage(e));
+  }
+}
+
 export async function generateRoutes(app: FastifyInstance) {
+  app.get<{ Params: { taskId: string } }>(
+    "/api/generate/ws/:taskId",
+    { websocket: true },
+    (socket, request) => {
+      const taskId = request.params.taskId;
+      const shouldSubscribe = sendTask(socket, taskId);
+      if (!shouldSubscribe) {
+        socket.close();
+        return;
+      }
+
+      const unsubscribe = subscribeImageQueueTask(taskId, (task) => {
+        socket.send(
+          JSON.stringify({
+            ...task,
+            error: task.errorMessage,
+            images: task.result?.images,
+            created: task.result?.created,
+          }),
+        );
+        if (task.status === "completed" || task.status === "failed") {
+          unsubscribe();
+          socket.close();
+        }
+      });
+
+      socket.on("close", unsubscribe);
+      socket.on("error", unsubscribe);
+    },
+  );
+
   app.get<{ Params: { taskId: string } }>(
     "/api/generate/status/:taskId",
     async (request, reply) => {
@@ -145,97 +300,15 @@ export async function generateRoutes(app: FastifyInstance) {
       return reply.status(400).send({ error: referenceImages.error });
     }
 
-    try {
-      const openai = getOpenAI();
-      const model = getImageModel();
-      const mime =
-        normalized.format === "jpeg" ? "image/jpeg" : `image/${normalized.format}`;
-      const responses: Images.ImagesResponse[] = [];
-      createImageQueueTask(normalized.taskId ?? request.id, normalized.n);
-      const queueTaskId = normalized.taskId ?? request.id;
+    const queueTaskId = normalized.taskId ?? request.id;
+    const queueTask = createImageQueueTask(queueTaskId, normalized.n);
+    void runImageGenerationTask(queueTaskId, normalized, referenceImages);
 
-      if (referenceImages.length > 0) {
-        responses.push(
-          ...(await Promise.all(
-            Array.from({ length: normalized.n }, async () => {
-              const uploadables = await Promise.all(
-                referenceImages.map((image) =>
-                  toFile(image.buffer, image.name, { type: image.type }),
-                ),
-              );
-              const editParams: Images.ImageEditParamsNonStreaming = {
-                image: uploadables,
-                model,
-                prompt: normalized.prompt,
-                size: normalized.size,
-                n: 1,
-                quality: normalized.quality,
-                output_format: normalized.format,
-              };
-              return enqueueImageGeneration(queueTaskId, () =>
-                openai.images.edit(editParams),
-              );
-            }),
-          )),
-        );
-      } else {
-        const requestParams: Images.ImageGenerateParamsNonStreaming = {
-          model,
-          prompt: normalized.prompt,
-          size: normalized.size,
-          n: 1,
-          quality: normalized.quality,
-          output_format: normalized.format,
-        };
-        responses.push(
-          ...(await Promise.all(
-            Array.from({ length: normalized.n }, () =>
-              enqueueImageGeneration(queueTaskId, () =>
-                openai.images.generate(requestParams),
-              ),
-            ),
-          )),
-        );
-      }
-
-      const sources = responses
-        .flatMap((response) => response.data ?? [])
-        .map((data) => imageSourceToDataUrl(data, mime))
-        .filter((source): source is string => Boolean(source))
-        .slice(0, normalized.n);
-
-      if (sources.length === 0) {
-        return reply.status(502).send({ error: "model returned no images" });
-      }
-
-      const payload: GenerateResponse = {
-        images: sources.map((src) => ({ src })),
-        created: responses[0]?.created ?? Math.floor(Date.now() / 1000),
-      };
-      const queueTask = getImageQueueTask(queueTaskId);
-      if (queueTask) {
-        payload.queuedAt = queueTask.queuedAt;
-        payload.generationStartedAt = queueTask.generationStartedAt;
-        payload.completedAt = queueTask.completedAt;
-      }
-      return reply.send(payload);
-    } catch (e: unknown) {
-      const err = e as {
-        name?: string;
-        status?: number;
-        message?: string;
-        error?: { message?: string };
-      };
-      const isTimeout =
-        err.name === "APIConnectionTimeoutError" ||
-        (typeof err.message === "string" &&
-          err.message.toLowerCase().includes("timed out"));
-      const status =
-        typeof err.status === "number" ? err.status : isTimeout ? 504 : 500;
-      const message = isTimeout
-        ? "Image generation timed out. Try again, or increase OPENAI_REQUEST_TIMEOUT_MS."
-        : err.error?.message ?? err.message ?? "image generation failed";
-      return reply.status(status).send({ error: message });
-    }
+    return reply.send({
+      taskId: queueTask.id,
+      status: queueTask.status,
+      total: queueTask.total,
+      queuedAt: queueTask.queuedAt,
+    });
   });
 }

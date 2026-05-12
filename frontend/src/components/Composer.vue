@@ -221,14 +221,13 @@ import { Close, MagicStick, Paperclip, Top } from "@element-plus/icons-vue";
 import gsap from "gsap";
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 
-import { generateImages } from "@/lib/api";
+import { createGenerateTask } from "@/lib/api";
 import {
   FORMAT_OPTIONS,
   N_OPTIONS,
   QUALITY_OPTIONS,
   SIZE_OPTIONS,
   type GenerateRequest,
-  type HistoryItem,
   type ReferenceImage,
 } from "@/lib/types";
 
@@ -241,8 +240,6 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   start: [taskId: string, request: GenerateRequest];
-  success: [taskId: string, item: HistoryItem];
-  error: [taskId: string, item: HistoryItem];
 }>();
 
 const DEFAULT_VALUES: GenerateRequest = {
@@ -252,7 +249,6 @@ const DEFAULT_VALUES: GenerateRequest = {
   format: "png",
   n: 1,
 };
-const CLIENT_TIMEOUT_MS = 10 * 60 * 1000 + 10_000;
 const MAX_REFERENCE_IMAGES = 4;
 const MAX_REFERENCE_IMAGE_BYTES = 10 * 1024 * 1024;
 
@@ -422,59 +418,13 @@ async function handleSubmit() {
   playSendShine();
   pulseSparkle();
 
-  emit("start", taskId, request);
-  form.prompt = "";
-  referenceImages.value = [];
-
-  const startedAt = Date.now();
-  const controller = new AbortController();
-  const timeoutId = window.setTimeout(() => controller.abort(), CLIENT_TIMEOUT_MS);
   try {
-    const json = await generateImages(request, controller.signal);
-    const durationMs =
-      json.generationStartedAt && json.completedAt
-        ? json.completedAt - json.generationStartedAt
-        : Date.now() - startedAt;
-    const item: HistoryItem = {
-      id: makeId(),
-      createdAt: Date.now(),
-      prompt: request.prompt,
-      size: request.size,
-      quality: request.quality,
-      format: request.format,
-      n: request.n,
-      images: json.images.map((img) => img.src),
-      referenceImages: request.referenceImages,
-      favorite: false,
-      durationMs,
-    };
-    emit("success", taskId, item);
+    const task = await createGenerateTask(request);
+    emit("start", task.taskId, request);
+    form.prompt = "";
+    referenceImages.value = [];
   } catch (e) {
-    const msg =
-      e instanceof DOMException && e.name === "AbortError"
-        ? "请求超时（10 分钟），上游未返回。请重试或检查代理。"
-        : e instanceof Error
-          ? e.message
-          : "生成失败";
-    const item: HistoryItem = {
-      id: makeId(),
-      createdAt: Date.now(),
-      prompt: request.prompt,
-      size: request.size,
-      quality: request.quality,
-      format: request.format,
-      n: request.n,
-      images: [],
-      referenceImages: request.referenceImages,
-      favorite: false,
-      status: "failed",
-      errorMessage: msg,
-      durationMs: Date.now() - startedAt,
-    };
-    error.value = msg;
-    emit("error", taskId, item);
-  } finally {
-    window.clearTimeout(timeoutId);
+    error.value = e instanceof Error ? e.message : "创建任务失败";
   }
 }
 

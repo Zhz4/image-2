@@ -26,6 +26,13 @@ export type GenerateResponse = {
   completedAt?: number;
 };
 
+export type CreateGenerateTaskResponse = {
+  taskId: string;
+  status: "waiting";
+  total: number;
+  queuedAt: number;
+};
+
 export type HistoryItem = {
   id: string;
   createdAt: number;
@@ -47,6 +54,12 @@ export type HistoryFilter = "all" | "favorites";
 export type GeneratingTask = {
   id: string;
   request: GenerateRequest;
+  status?: GenerateQueueStatus["status"];
+  total?: number;
+  completed?: number;
+  active?: number;
+  queuedAt?: number;
+  generationStartedAt?: number;
 };
 
 export type GenerateQueueStatus = {
@@ -60,6 +73,18 @@ export type GenerateQueueStatus = {
   completedAt?: number;
   failedAt?: number;
 };
+
+export type GenerateTaskMessage =
+  | GenerateQueueStatus
+  | (GenerateQueueStatus & {
+      status: "completed";
+      images: { src: string }[];
+      created: number;
+    })
+  | (GenerateQueueStatus & {
+      status: "failed";
+      error: string;
+    });
 
 export const SIZE_OPTIONS: Size[] = [
   "auto",

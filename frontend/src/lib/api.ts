@@ -1,20 +1,27 @@
 import type {
+  CreateGenerateTaskResponse,
   GenerateQueueStatus,
   GenerateRequest,
-  GenerateResponse,
+  GenerateTaskMessage,
 } from "@/lib/types";
 
-export async function generateImages(
+type GenerateTaskHandlers = {
+  onMessage: (message: GenerateTaskMessage) => void;
+  onError?: (error: Event) => void;
+  onClose?: () => void;
+};
+
+export async function createGenerateTask(
   request: GenerateRequest,
   signal?: AbortSignal,
-): Promise<GenerateResponse> {
+): Promise<CreateGenerateTaskResponse> {
   const res = await fetch("/api/generate", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(request),
     signal,
   });
-  const json = (await res.json()) as GenerateResponse | { error: string };
+  const json = (await res.json()) as CreateGenerateTaskResponse | { error: string };
 
   if (!res.ok || "error" in json) {
     const message = "error" in json ? json.error : `HTTP ${res.status}`;
@@ -22,6 +29,37 @@ export async function generateImages(
   }
 
   return json;
+}
+
+export function connectGenerateTask(
+  taskId: string,
+  handlers: GenerateTaskHandlers,
+): WebSocket {
+  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  const url = `${protocol}//${window.location.host}/api/generate/ws/${encodeURIComponent(taskId)}`;
+  const socket = new WebSocket(url);
+
+  socket.addEventListener("message", (event) => {
+    try {
+      handlers.onMessage(JSON.parse(event.data as string) as GenerateTaskMessage);
+    } catch {
+      handlers.onMessage({
+        id: taskId,
+        status: "failed",
+        total: 0,
+        completed: 0,
+        active: 0,
+        queuedAt: Date.now(),
+        failedAt: Date.now(),
+        error: "invalid task message",
+      });
+    }
+  });
+
+  if (handlers.onError) socket.addEventListener("error", handlers.onError);
+  if (handlers.onClose) socket.addEventListener("close", handlers.onClose);
+
+  return socket;
 }
 
 export async function getGenerateQueueStatus(

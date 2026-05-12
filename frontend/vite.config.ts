@@ -7,6 +7,7 @@ const apiProxy: Record<string, string | ProxyOptions> = {
   "/api": {
     target: "http://localhost:3112",
     changeOrigin: true,
+    ws: true,
   },
 };
 

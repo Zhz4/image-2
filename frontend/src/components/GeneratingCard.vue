@@ -99,11 +99,10 @@
 import gsap from "gsap";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
-import { getGenerateQueueStatus } from "@/lib/api";
-import type { GenerateQueueStatus, GenerateRequest } from "@/lib/types";
+import type { GeneratingTask } from "@/lib/types";
 
 const props = defineProps<{
-  request: GenerateRequest;
+  task: GeneratingTask;
 }>();
 
 const rootRef = ref<HTMLDivElement | null>(null);
@@ -115,17 +114,15 @@ const ringRef = ref<HTMLDivElement | null>(null);
 const dotsRef = ref<HTMLSpanElement | null>(null);
 const barsRef = ref<HTMLDivElement | null>(null);
 const elapsed = ref(0);
-const queueStatus = ref<GenerateQueueStatus | null>(null);
 const isGenerating = computed(
-  () => queueStatus.value?.status === "generating" || Boolean(generationStartedAt.value),
+  () => props.task.status === "generating" || Boolean(generationStartedAt.value),
 );
-const generationStartedAt = computed(() => queueStatus.value?.generationStartedAt);
+const generationStartedAt = computed(() => props.task.generationStartedAt);
+const request = computed(() => props.task.request);
 
 let intervalId: number | undefined;
-let pollIntervalId: number | undefined;
 let ctx: gsap.Context | undefined;
 let ringTween: gsap.core.Tween | undefined;
-let statusController: AbortController | undefined;
 
 function formatElapsed(ms: number): string {
   const total = Math.floor(ms / 1000);
@@ -135,11 +132,6 @@ function formatElapsed(ms: number): string {
 }
 
 onMounted(() => {
-  void refreshQueueStatus();
-  pollIntervalId = window.setInterval(() => {
-    void refreshQueueStatus();
-  }, 1000);
-
   intervalId = window.setInterval(() => {
     elapsed.value = generationStartedAt.value
       ? Date.now() - generationStartedAt.value
@@ -222,25 +214,6 @@ onMounted(() => {
   }, rootRef.value ?? undefined);
 });
 
-async function refreshQueueStatus() {
-  const taskId = props.request.taskId;
-  if (!taskId) {
-    queueStatus.value = null;
-    return;
-  }
-
-  statusController?.abort();
-  statusController = new AbortController();
-  try {
-    const status = await getGenerateQueueStatus(taskId, statusController.signal);
-    if (status) queueStatus.value = status;
-  } catch (error) {
-    if (!(error instanceof DOMException && error.name === "AbortError")) {
-      window.clearInterval(pollIntervalId);
-    }
-  }
-}
-
 watch(isGenerating, (generating) => {
   if (generating) {
     ringTween?.play();
@@ -251,8 +224,6 @@ watch(isGenerating, (generating) => {
 
 onBeforeUnmount(() => {
   if (intervalId) window.clearInterval(intervalId);
-  if (pollIntervalId) window.clearInterval(pollIntervalId);
-  statusController?.abort();
   ctx?.revert();
 });
 </script>

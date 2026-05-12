@@ -10,7 +10,7 @@
     <GeneratingCard
       v-for="task in generating"
       :key="task.id"
-      :request="task.request"
+      :task="task"
     />
     <HistoryItemCard
       v-for="item in filtered"
