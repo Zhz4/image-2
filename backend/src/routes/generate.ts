@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import { randomUUID } from "node:crypto";
 import { toFile } from "openai";
 import type { Images } from "openai/resources/images";
 
@@ -11,6 +12,7 @@ import {
   subscribeImageQueueTask,
 } from "../lib/image-queue.js";
 import { getImageModel, getOpenAI } from "../lib/openai.js";
+import { uploadImageToR2, type ImageMimeType } from "../lib/r2.js";
 import {
   FORMAT_OPTIONS,
   QUALITY_OPTIONS,
@@ -112,10 +114,28 @@ function normalizeReferenceImages(
   return normalized;
 }
 
-function imageSourceToDataUrl(data: Images.Image, mime: string): string | null {
-  if (data.url) return data.url;
-  if (data.b64_json) return `data:${mime};base64,${data.b64_json}`;
-  return null;
+function formatToMime(format: Format): ImageMimeType {
+  if (format === "jpeg") return "image/jpeg";
+  if (format === "png") return "image/png";
+  return "image/webp";
+}
+
+async function uploadImage(
+  data: Images.Image,
+  contentType: ImageMimeType,
+): Promise<string> {
+  const ext = contentType === "image/jpeg" ? "jpg" : contentType.replace("image/", "");
+  const key = `images/${randomUUID()}.${ext}`;
+  if (data.b64_json) return uploadImageToR2({ b64_json: data.b64_json }, key, contentType);
+  if (data.url) {
+    // Some providers return base64 data URLs in the url field instead of a real https URL
+    const dataUrlMatch = /^data:[^;]+;base64,(.+)$/.exec(data.url);
+    if (dataUrlMatch) {
+      return uploadImageToR2({ b64_json: dataUrlMatch[1] }, key, contentType);
+    }
+    return uploadImageToR2({ url: data.url }, key, contentType);
+  }
+  throw new Error("OpenAI returned an image with neither url nor b64_json");
 }
 
 async function enqueueImageGeneration(
@@ -177,8 +197,7 @@ async function runImageGenerationTask(
   try {
     const openai = getOpenAI();
     const model = getImageModel();
-    const mime =
-      normalized.format === "jpeg" ? "image/jpeg" : `image/${normalized.format}`;
+    const contentType = formatToMime(normalized.format);
     const responses: Images.ImagesResponse[] = [];
 
     if (referenceImages.length > 0) {
@@ -227,16 +246,18 @@ async function runImageGenerationTask(
       );
     }
 
-    const sources = responses
+    const imageData = responses
       .flatMap((response) => response.data ?? [])
-      .map((data) => imageSourceToDataUrl(data, mime))
-      .filter((source): source is string => Boolean(source))
       .slice(0, normalized.n);
 
-    if (sources.length === 0) {
+    if (imageData.length === 0) {
       failImageQueueTask(taskId, "model returned no images");
       return;
     }
+
+    const sources = await Promise.all(
+      imageData.map((data) => uploadImage(data, contentType)),
+    );
 
     completeImageQueueTask(taskId, {
       images: sources.map((src) => ({ src })),
