@@ -18,6 +18,17 @@ export type ReferenceImage = {
   url: string;
 };
 
+export type AuthUser = {
+  id: string;
+  email: string;
+  createdAt: string;
+};
+
+export type AuthResponse = {
+  token: string;
+  user: AuthUser;
+};
+
 export type GenerateResponse = {
   images: { src: string }[];
   created: number;

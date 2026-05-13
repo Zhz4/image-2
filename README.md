@@ -57,3 +57,22 @@ pnpm dev:frontend
 pnpm lint
 pnpm build
 ```
+
+## SmoothAI auth setup
+
+The login/register flow stores users in Cloudflare D1 through the D1 REST API.
+Create a D1 database, apply `backend/migrations/0001_create_users.sql`, then set:
+
+```bash
+CLOUDFLARE_D1_ACCOUNT_ID=
+CLOUDFLARE_D1_DATABASE_ID=
+CLOUDFLARE_D1_API_TOKEN=
+JWT_SECRET=
+JWT_EXPIRES_IN_SECONDS=604800
+```
+
+Example migration command:
+
+```bash
+wrangler d1 execute <database-name> --remote --file backend/migrations/0001_create_users.sql
+```

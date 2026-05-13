@@ -1,5 +1,20 @@
 <template>
   <main class="mx-auto flex min-h-dvh w-full max-w-325 flex-col gap-4 px-4 pb-80 pt-6 sm:pb-68 lg:px-6">
+    <header class="flex items-center justify-between gap-3 rounded-xl border bg-card/80 px-4 py-3 text-card-foreground shadow-sm backdrop-blur">
+      <div class="flex min-w-0 items-center gap-3">
+        <span class="flex size-9 shrink-0 items-center justify-center rounded-lg bg-linear-to-br from-fuchsia-500 via-violet-500 to-sky-500 text-sm font-bold text-white">
+          S
+        </span>
+        <div class="min-w-0">
+          <p class="font-semibold leading-tight">SmoothAI</p>
+          <p class="truncate text-xs text-muted-foreground">{{ user?.email }}</p>
+        </div>
+      </div>
+      <el-button text @click="handleLogout">
+        <el-icon><SwitchButton /></el-icon>
+        <span>退出登录</span>
+      </el-button>
+    </header>
     <AnnouncementCard />
     <HistoryToolbar
       v-model:filter="filter"
@@ -33,7 +48,9 @@
 </template>
 
 <script setup lang="ts">
+import { SwitchButton } from "@element-plus/icons-vue";
 import { onBeforeUnmount, ref, shallowRef } from "vue";
+import { useRouter } from "vue-router";
 
 import AnnouncementCard from "@/components/AnnouncementCard.vue";
 import Composer from "@/components/Composer.vue";
@@ -41,6 +58,7 @@ import HistoryList from "@/components/HistoryList.vue";
 import HistoryToolbar from "@/components/HistoryToolbar.vue";
 import { useHistory } from "@/composables/use-history";
 import { connectGenerateTask } from "@/api";
+import { useAuth } from "@/composables/use-auth";
 import type {
   GenerateRequest,
   GenerateTaskMessage,
@@ -54,6 +72,8 @@ type ComposerInitial = Partial<Omit<GenerateRequest, "prompt">> & {
 };
 
 const { items, add, remove, toggleFavorite } = useHistory();
+const { user, logout } = useAuth();
+const router = useRouter();
 const filter = ref<HistoryFilter>("all");
 const query = ref("");
 const favoritesOnly = ref(false);
@@ -61,6 +81,11 @@ const composerInitial = shallowRef<ComposerInitial | undefined>(undefined);
 const composerKey = ref(0);
 const generating = ref<GeneratingTask[]>([]);
 const sockets = new Map<string, WebSocket>();
+
+function handleLogout() {
+  logout();
+  void router.replace("/login");
+}
 
 function loadIntoComposer(item: HistoryItem) {
   composerInitial.value = {

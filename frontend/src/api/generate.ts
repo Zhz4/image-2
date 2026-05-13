@@ -29,7 +29,7 @@ export function connectGenerateTask(
   handlers: GenerateTaskHandlers,
 ): WebSocket {
   const socket = new WebSocket(
-    getWebsocketUrl(`/api/generate/ws/${encodeURIComponent(taskId)}`),
+    getWebsocketUrl(`/api/generate/ws/${encodeURIComponent(taskId)}`, true),
   );
 
   socket.addEventListener("message", (event) => {

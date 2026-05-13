@@ -5,6 +5,7 @@ import dotenv from "dotenv";
 import Fastify from "fastify";
 import type { FastifyError } from "fastify";
 
+import { authRoutes } from "./routes/auth.js";
 import { generateRoutes } from "./routes/generate.js";
 import { uploadRoutes } from "./routes/uploads.js";
 
@@ -33,6 +34,7 @@ app.setErrorHandler((error: FastifyError, request, reply) => {
 });
 
 app.get("/health", async () => ({ ok: true }));
+await app.register(authRoutes);
 await app.register(uploadRoutes);
 await app.register(generateRoutes);
 

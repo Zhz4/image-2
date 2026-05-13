@@ -4,6 +4,7 @@ import https from "node:https";
 import { toFile, type Uploadable } from "openai";
 import type { Images } from "openai/resources/images";
 
+import { getRequiredUser, getUserFromRequest, requireAuth } from "../lib/auth.js";
 import {
   addTrackedImageGeneration,
   completeImageQueueTask,
@@ -14,7 +15,7 @@ import {
 } from "../lib/image-queue.js";
 import { getImageModel, getOpenAI } from "../lib/openai.js";
 import {
-  isR2PublicObjectUrl,
+  getR2PublicObjectKey,
   uploadImageToR2,
   type ImageMimeType,
 } from "../lib/r2.js";
@@ -82,6 +83,7 @@ function normalizeRequest(body: GenerateBody): GenerateRequest | { error: string
 
 function normalizeReferenceImages(
   images: ReferenceImage[] | undefined,
+  ownerId: string,
 ): NormalizedReferenceImage[] | { error: string } {
   if (!Array.isArray(images) || images.length === 0) return [];
   if (images.length > MAX_REFERENCE_IMAGES) {
@@ -95,12 +97,17 @@ function normalizeReferenceImages(
     }
 
     const url = image.url.trim();
+    let objectKey: string | null;
     try {
-      if (!isR2PublicObjectUrl(url)) {
+      objectKey = getR2PublicObjectKey(url);
+      if (!objectKey) {
         return { error: "reference images must be uploaded first" };
       }
     } catch {
       return { error: "reference images must be valid URLs" };
+    }
+    if (!objectKey.startsWith(`references/${ownerId}/`)) {
+      return { error: "reference images must belong to the current user" };
     }
 
     const type =
@@ -204,9 +211,13 @@ function getErrorMessage(e: unknown): string {
     : err.error?.message ?? err.message ?? "image generation failed";
 }
 
-function sendTask(socket: { send: (data: string) => void }, taskId: string) {
+function sendTask(
+  socket: { send: (data: string) => void },
+  taskId: string,
+  ownerId: string,
+) {
   const task = getImageQueueTask(taskId);
-  if (!task) {
+  if (!task || task.ownerId !== ownerId) {
     socket.send(
       JSON.stringify({
         id: taskId,
@@ -314,9 +325,15 @@ export async function generateRoutes(app: FastifyInstance) {
   app.get<{ Params: { taskId: string } }>(
     "/api/generate/ws/:taskId",
     { websocket: true },
-    (socket, request) => {
+    async (socket, request) => {
+      const user = await getUserFromRequest(request);
+      if (!user) {
+        socket.close(1008, "authentication required");
+        return;
+      }
+
       const taskId = request.params.taskId;
-      const shouldSubscribe = sendTask(socket, taskId);
+      const shouldSubscribe = sendTask(socket, taskId, user.id);
       if (!shouldSubscribe) {
         socket.close();
         return;
@@ -344,34 +361,48 @@ export async function generateRoutes(app: FastifyInstance) {
 
   app.get<{ Params: { taskId: string } }>(
     "/api/generate/status/:taskId",
+    { preHandler: requireAuth },
     async (request, reply) => {
+      const user = getRequiredUser(request);
       const task = getImageQueueTask(request.params.taskId);
-      if (!task) {
+      if (!task || task.ownerId !== user.id) {
         return reply.status(404).send({ error: "task not found" });
       }
       return reply.send(task);
     },
   );
 
-  app.post<{ Body: GenerateBody }>("/api/generate", async (request, reply) => {
-    const normalized = normalizeRequest(request.body ?? {});
-    if ("error" in normalized) {
-      return reply.status(400).send({ error: normalized.error });
-    }
-    const referenceImages = normalizeReferenceImages(request.body?.referenceImages);
-    if ("error" in referenceImages) {
-      return reply.status(400).send({ error: referenceImages.error });
-    }
+  app.post<{ Body: GenerateBody }>(
+    "/api/generate",
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      const user = getRequiredUser(request);
+      const normalized = normalizeRequest(request.body ?? {});
+      if ("error" in normalized) {
+        return reply.status(400).send({ error: normalized.error });
+      }
+      const referenceImages = normalizeReferenceImages(
+        request.body?.referenceImages,
+        user.id,
+      );
+      if ("error" in referenceImages) {
+        return reply.status(400).send({ error: referenceImages.error });
+      }
 
-    const queueTaskId = normalized.taskId ?? request.id;
-    const queueTask = createImageQueueTask(queueTaskId, normalized.n);
-    void runImageGenerationTask(queueTaskId, normalized, referenceImages);
+      const queueTaskId = normalized.taskId ?? request.id;
+      if (getImageQueueTask(queueTaskId)) {
+        return reply.status(409).send({ error: "task already exists" });
+      }
 
-    return reply.send({
-      taskId: queueTask.id,
-      status: queueTask.status,
-      total: queueTask.total,
-      queuedAt: queueTask.queuedAt,
-    });
-  });
+      const queueTask = createImageQueueTask(queueTaskId, normalized.n, user.id);
+      void runImageGenerationTask(queueTaskId, normalized, referenceImages);
+
+      return reply.send({
+        taskId: queueTask.id,
+        status: queueTask.status,
+        total: queueTask.total,
+        queuedAt: queueTask.queuedAt,
+      });
+    },
+  );
 }

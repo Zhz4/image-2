@@ -76,6 +76,19 @@ export function isR2PublicObjectUrl(value: string): boolean {
   );
 }
 
+export function getR2PublicObjectKey(value: string): string | null {
+  if (!isR2PublicObjectUrl(value)) return null;
+
+  const config = getR2Config();
+  const base = new URL(`${normalizePublicUrl(config.publicUrl)}/`);
+  const url = new URL(value);
+  const basePath = base.pathname.endsWith("/")
+    ? base.pathname
+    : `${base.pathname}/`;
+
+  return url.pathname.slice(basePath.length);
+}
+
 export async function uploadImageToR2(
   source: UploadImageSource,
   key: string,

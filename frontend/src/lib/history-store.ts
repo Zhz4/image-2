@@ -6,11 +6,34 @@ const STORE_NAME = "history";
 const ITEM_STORE_NAME = "history-items";
 const HISTORY_KEY = "items";
 const LEGACY_STORAGE_KEY = "image-2:history";
+const DEFAULT_HISTORY_NAMESPACE = "anonymous";
+
+let historyNamespace = DEFAULT_HISTORY_NAMESPACE;
+
+export function setHistoryStoreUserId(userId: string | null): void {
+  historyNamespace = userId ?? DEFAULT_HISTORY_NAMESPACE;
+}
+
+function isDefaultHistoryNamespace(): boolean {
+  return historyNamespace === DEFAULT_HISTORY_NAMESPACE;
+}
+
+function getHistoryKey(): string {
+  return isDefaultHistoryNamespace()
+    ? HISTORY_KEY
+    : `${HISTORY_KEY}:${historyNamespace}`;
+}
+
+function getLegacyStorageKey(): string {
+  return isDefaultHistoryNamespace()
+    ? LEGACY_STORAGE_KEY
+    : `${LEGACY_STORAGE_KEY}:${historyNamespace}`;
+}
 
 function readLegacyStorage(): HistoryItem[] {
   if (typeof window === "undefined") return [];
   try {
-    const raw = window.localStorage.getItem(LEGACY_STORAGE_KEY);
+    const raw = window.localStorage.getItem(getLegacyStorageKey());
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed) ? (parsed as HistoryItem[]) : [];
@@ -22,7 +45,7 @@ function readLegacyStorage(): HistoryItem[] {
 function clearLegacyStorage() {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.removeItem(LEGACY_STORAGE_KEY);
+    window.localStorage.removeItem(getLegacyStorageKey());
   } catch {
     // Ignore storage cleanup failures.
   }
@@ -31,7 +54,7 @@ function clearLegacyStorage() {
 function writeLegacyStorage(items: HistoryItem[]) {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(LEGACY_STORAGE_KEY, JSON.stringify(items));
+    window.localStorage.setItem(getLegacyStorageKey(), JSON.stringify(items));
   } catch {
     // Base64 image payloads can exceed localStorage quota.
   }
@@ -87,13 +110,19 @@ function runStoreRequest<T>(
 
 async function readIndexedDb(): Promise<HistoryItem[] | null> {
   const result = await runStoreRequest("readonly", (store) =>
-    store.get(HISTORY_KEY),
+    store.get(getHistoryKey()),
   );
   return Array.isArray(result) ? (result as HistoryItem[]) : null;
 }
 
 async function clearIndexedDbList(): Promise<void> {
-  await runStoreRequest("readwrite", (store) => store.delete(HISTORY_KEY));
+  await runStoreRequest("readwrite", (store) => store.delete(getHistoryKey()));
+}
+
+async function writeIndexedDbList(items: HistoryItem[]): Promise<void> {
+  await runStoreRequest("readwrite", (store) =>
+    store.put(items, getHistoryKey()),
+  );
 }
 
 function requestToPromise<T>(request: IDBRequest<T>): Promise<T> {
@@ -185,8 +214,17 @@ export async function readHistoryStore(): Promise<HistoryItem[]> {
   const legacyItems = readLegacyStorage();
 
   try {
-    const itemStoreItems = await readIndexedDbItems();
     const indexedItems = (await readIndexedDb()) ?? [];
+    if (!isDefaultHistoryNamespace()) {
+      const mergedItems = mergeHistoryItems(indexedItems, legacyItems);
+      if (legacyItems.length > 0 || mergedItems.length > indexedItems.length) {
+        await writeIndexedDbList(mergedItems);
+        clearLegacyStorage();
+      }
+      return mergedItems;
+    }
+
+    const itemStoreItems = await readIndexedDbItems();
     const mergedItems = mergeHistoryItems(
       indexedItems,
       legacyItems,
@@ -209,8 +247,12 @@ export async function readHistoryStore(): Promise<HistoryItem[]> {
 
 export async function writeHistoryStore(items: HistoryItem[]): Promise<void> {
   try {
-    await writeIndexedDbItems(items);
-    await clearIndexedDbList();
+    if (isDefaultHistoryNamespace()) {
+      await writeIndexedDbItems(items);
+      await clearIndexedDbList();
+    } else {
+      await writeIndexedDbList(items);
+    }
     clearLegacyStorage();
   } catch {
     writeLegacyStorage(items);

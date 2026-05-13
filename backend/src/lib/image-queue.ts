@@ -12,6 +12,7 @@ export type ImageQueueTaskResult = {
 
 export type ImageQueueTaskStatus = {
   id: string;
+  ownerId: string;
   status: "waiting" | "generating" | "completed" | "failed";
   total: number;
   completed: number;
@@ -73,9 +74,14 @@ function notifyImageQueueTask(task: ImageQueueTaskStatus) {
   }
 }
 
-export function createImageQueueTask(taskId: string, total: number) {
+export function createImageQueueTask(
+  taskId: string,
+  total: number,
+  ownerId: string,
+) {
   const task: ImageQueueTaskStatus = {
     id: taskId,
+    ownerId,
     status: "waiting",
     total,
     completed: 0,
