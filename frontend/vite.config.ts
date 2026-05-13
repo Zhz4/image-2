@@ -1,15 +1,7 @@
 import tailwindcss from "@tailwindcss/vite";
 import vue from "@vitejs/plugin-vue";
 import { fileURLToPath, URL } from "node:url";
-import { defineConfig, type ProxyOptions } from "vite";
-
-const apiProxy: Record<string, string | ProxyOptions> = {
-  "/api": {
-    target: "http://localhost:3112",
-    changeOrigin: true,
-    ws: true,
-  },
-};
+import { defineConfig } from "vite";
 
 export default defineConfig({
   plugins: [vue(), tailwindcss()],
@@ -20,10 +12,8 @@ export default defineConfig({
   },
   server: {
     port: 5173,
-    proxy: apiProxy,
   },
   preview: {
     port: 5173,
-    proxy: apiProxy,
   },
 });

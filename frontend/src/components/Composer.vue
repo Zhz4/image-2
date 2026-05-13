@@ -231,7 +231,7 @@ import { Close, Loading, MagicStick, Paperclip, Top } from "@element-plus/icons-
 import gsap from "gsap";
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 
-import { createGenerateTask, uploadReferenceImage } from "@/lib/api";
+import { createGenerateTask, uploadReferenceImage } from "@/api";
 import {
   FORMAT_OPTIONS,
   N_OPTIONS,

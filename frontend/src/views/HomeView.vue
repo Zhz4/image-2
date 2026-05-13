@@ -40,7 +40,7 @@ import Composer from "@/components/Composer.vue";
 import HistoryList from "@/components/HistoryList.vue";
 import HistoryToolbar from "@/components/HistoryToolbar.vue";
 import { useHistory } from "@/composables/use-history";
-import { connectGenerateTask } from "@/lib/api";
+import { connectGenerateTask } from "@/api";
 import type {
   GenerateRequest,
   GenerateTaskMessage,
