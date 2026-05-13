@@ -1,21 +1,21 @@
 services:
   backend:
-    build:
-      context: .
-      target: backend
+    image: zha4/image-2-backend:latest
+    container_name: image-2-backend
     env_file:
-      - ./.env.docker
+      - ./.env.prod
     environment:
       PORT: 3002
       NODE_ENV: production
+    expose:
+      - "3002"
     restart: unless-stopped
 
   frontend:
-    build:
-      context: .
-      target: frontend
+    image: zha4/image-2-frontend:latest
+    container_name: image-2-frontend
     ports:
-      - "8080:80"
+      - "${APP_PORT:-8080}:8123"
     depends_on:
       - backend
     restart: unless-stopped

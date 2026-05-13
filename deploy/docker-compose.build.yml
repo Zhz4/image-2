@@ -1,0 +1,23 @@
+services:
+  backend:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      target: backend
+    env_file:
+      - ../.env.docker
+    environment:
+      PORT: 3002
+      NODE_ENV: production
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      target: frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+    restart: unless-stopped

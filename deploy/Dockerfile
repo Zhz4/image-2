@@ -15,6 +15,7 @@ RUN pnpm install --frozen-lockfile
 FROM deps AS build
 COPY backend backend
 COPY frontend frontend
+COPY deploy/nginx deploy/nginx
 RUN pnpm build
 RUN pnpm deploy --filter @image-2/backend --prod --legacy /prod/backend
 
@@ -26,6 +27,6 @@ EXPOSE 3002
 CMD ["node", "dist/server.js"]
 
 FROM nginx:1.27-alpine AS frontend
-COPY deploy/nginx/default.conf /etc/nginx/conf.d/default.conf
+COPY --from=build /app/deploy/nginx/default.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /app/frontend/dist /usr/share/nginx/html
 EXPOSE 80
