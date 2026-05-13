@@ -2,6 +2,7 @@
   "name": "image-2",
   "version": "0.1.0",
   "private": true,
+  "packageManager": "pnpm@10.32.1",
   "scripts": {
     "dev": "pnpm -r --parallel --filter @image-2/backend --filter @image-2/frontend dev",
     "build": "pnpm --filter @image-2/backend build && pnpm --filter @image-2/frontend build",
