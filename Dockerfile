@@ -16,7 +16,7 @@ FROM deps AS build
 COPY backend backend
 COPY frontend frontend
 RUN pnpm build
-RUN pnpm deploy --filter @image-2/backend --prod /prod/backend
+RUN pnpm deploy --filter @image-2/backend --prod --legacy /prod/backend
 
 FROM node:20-alpine AS backend
 ENV NODE_ENV=production
