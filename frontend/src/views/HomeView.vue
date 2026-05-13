@@ -40,7 +40,11 @@
         <Composer
           :initial="composerInitial"
           :reset-key="composerKey"
+          :active-task-count="activeTaskCount"
+          :max-active-tasks="maxActiveTasks"
           @start="handleStart"
+          @ready="handleReady"
+          @fail="handleCreateFailure"
         />
       </div>
     </div>
@@ -49,7 +53,7 @@
 
 <script setup lang="ts">
 import { SwitchButton } from "@element-plus/icons-vue";
-import { onBeforeUnmount, ref, shallowRef } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, shallowRef } from "vue";
 import { useRouter } from "vue-router";
 
 import AnnouncementCard from "@/components/AnnouncementCard.vue";
@@ -57,7 +61,7 @@ import Composer from "@/components/Composer.vue";
 import HistoryList from "@/components/HistoryList.vue";
 import HistoryToolbar from "@/components/HistoryToolbar.vue";
 import { useHistory } from "@/composables/use-history";
-import { connectGenerateTask } from "@/api";
+import { connectGenerateTask, getGenerateQueueStatus } from "@/api";
 import { useAuth } from "@/composables/use-auth";
 import type {
   GenerateRequest,
@@ -81,6 +85,22 @@ const composerInitial = shallowRef<ComposerInitial | undefined>(undefined);
 const composerKey = ref(0);
 const generating = ref<GeneratingTask[]>([]);
 const sockets = new Map<string, WebSocket>();
+const PENDING_TASK_STORAGE_PREFIX = "image-2:pending-generate-tasks";
+const DEFAULT_MAX_ACTIVE_TASKS = 2;
+const configuredMaxActiveTasks = Number.parseInt(
+  import.meta.env.VITE_IMAGE_GENERATION_MAX_ACTIVE_TASKS_PER_USER ?? "",
+  10,
+);
+const maxActiveTasks =
+  Number.isFinite(configuredMaxActiveTasks) && configuredMaxActiveTasks > 0
+    ? configuredMaxActiveTasks
+    : DEFAULT_MAX_ACTIVE_TASKS;
+const activeTaskCount = computed(() => generating.value.length);
+
+type PendingGenerateTask = {
+  id: string;
+  request: GenerateRequest;
+};
 
 function handleLogout() {
   logout();
@@ -103,7 +123,85 @@ function loadIntoComposer(item: HistoryItem) {
 
 function handleStart(taskId: string, request: GenerateRequest) {
   generating.value = [{ id: taskId, request }, ...generating.value];
+  savePendingTask({ id: taskId, request });
+}
+
+function handleReady(taskId: string, request: GenerateRequest) {
   connectTask(taskId, request);
+}
+
+function handleCreateFailure(
+  taskId: string,
+  request: GenerateRequest,
+  message: string,
+) {
+  finishTask(taskId, {
+    id: makeId(),
+    createdAt: Date.now(),
+    prompt: request.prompt,
+    size: request.size,
+    quality: request.quality,
+    format: request.format,
+    n: request.n,
+    images: [],
+    referenceImages: request.referenceImages,
+    favorite: false,
+    status: "failed",
+    errorMessage: message,
+  });
+}
+
+function getPendingTaskStorageKey(): string {
+  return user.value?.id
+    ? `${PENDING_TASK_STORAGE_PREFIX}:${user.value.id}`
+    : PENDING_TASK_STORAGE_PREFIX;
+}
+
+function readPendingTasks(): PendingGenerateTask[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(getPendingTaskStorageKey());
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (item): item is PendingGenerateTask =>
+        item &&
+        typeof item === "object" &&
+        typeof item.id === "string" &&
+        item.request &&
+        typeof item.request === "object" &&
+        typeof item.request.prompt === "string",
+    );
+  } catch {
+    return [];
+  }
+}
+
+function writePendingTasks(tasks: PendingGenerateTask[]) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(
+      getPendingTaskStorageKey(),
+      JSON.stringify(tasks),
+    );
+  } catch {
+    // Ignore storage quota or privacy-mode failures.
+  }
+}
+
+function savePendingTask(task: PendingGenerateTask) {
+  const tasks = readPendingTasks().filter((item) => item.id !== task.id);
+  writePendingTasks([task, ...tasks]);
+}
+
+function removePendingTask(taskId: string) {
+  const tasks = readPendingTasks().filter((item) => item.id !== taskId);
+  if (tasks.length === 0 && typeof window !== "undefined") {
+    window.localStorage.removeItem(getPendingTaskStorageKey());
+    return;
+  }
+  writePendingTasks(tasks);
 }
 
 function makeId(): string {
@@ -132,7 +230,56 @@ function finishTask(taskId: string, item: HistoryItem) {
   generating.value = generating.value.filter((task) => task.id !== taskId);
   sockets.get(taskId)?.close();
   sockets.delete(taskId);
+  removePendingTask(taskId);
   add(item);
+}
+
+async function restorePendingTasks() {
+  const pendingTasks = readPendingTasks();
+  if (pendingTasks.length === 0) return;
+
+  const restoredTasks = await Promise.all(
+    pendingTasks.map(async (task): Promise<GeneratingTask | null> => {
+      try {
+        const status = await getGenerateQueueStatus(task.id);
+        if (!status) return null;
+        return {
+          id: task.id,
+          request: task.request,
+          status: status.status,
+          total: status.total,
+          completed: status.completed,
+          active: status.active,
+          queuedAt: status.queuedAt,
+          generationStartedAt: status.generationStartedAt,
+        };
+      } catch {
+        return null;
+      }
+    }),
+  );
+
+  const restored = restoredTasks.filter(
+    (task): task is GeneratingTask => task !== null,
+  );
+  const restoredIds = new Set(restored.map((task) => task.id));
+
+  for (const task of pendingTasks) {
+    if (!restoredIds.has(task.id)) {
+      removePendingTask(task.id);
+    }
+  }
+
+  if (restored.length === 0) return;
+
+  generating.value = [
+    ...restored,
+    ...generating.value.filter((task) => !restoredIds.has(task.id)),
+  ];
+
+  for (const task of restored) {
+    connectTask(task.id, task.request);
+  }
 }
 
 function connectTask(taskId: string, request: GenerateRequest) {
@@ -208,5 +355,9 @@ onBeforeUnmount(() => {
     socket.close();
   }
   sockets.clear();
+});
+
+onMounted(() => {
+  void restorePendingTasks();
 });
 </script>

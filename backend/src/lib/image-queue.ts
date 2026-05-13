@@ -1,6 +1,10 @@
 import PQueue from "p-queue";
 
-const DEFAULT_IMAGE_CONCURRENCY = 2;
+const DEFAULT_IMAGE_CONCURRENCY = 10;
+const ACTIVE_TASK_STATUSES = new Set<ImageQueueTaskStatus["status"]>([
+  "waiting",
+  "generating",
+]);
 const TASK_RETENTION_MS = 5 * 60 * 1000;
 
 let queue: PQueue | null = null;
@@ -96,6 +100,16 @@ export function createImageQueueTask(
 export function getImageQueueTask(taskId: string) {
   const task = tasks.get(taskId);
   return task ? cloneTask(task) : undefined;
+}
+
+export function countActiveImageQueueTasksForUser(ownerId: string): number {
+  let count = 0;
+  for (const task of tasks.values()) {
+    if (task.ownerId === ownerId && ACTIVE_TASK_STATUSES.has(task.status)) {
+      count += 1;
+    }
+  }
+  return count;
 }
 
 export function subscribeImageQueueTask(

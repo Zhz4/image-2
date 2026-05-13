@@ -7,6 +7,7 @@ import type { Images } from "openai/resources/images";
 import { getRequiredUser, getUserFromRequest, requireAuth } from "../lib/auth.js";
 import {
   addTrackedImageGeneration,
+  countActiveImageQueueTasksForUser,
   completeImageQueueTask,
   createImageQueueTask,
   failImageQueueTask,
@@ -39,6 +40,7 @@ type NormalizedReferenceImage = {
 
 const MAX_REFERENCE_IMAGES = 4;
 const MAX_REFERENCE_IMAGE_BYTES = 10 * 1024 * 1024;
+const DEFAULT_MAX_ACTIVE_TASKS_PER_USER = 2;
 const SUPPORTED_REFERENCE_TYPES = new Set([
   "image/png",
   "image/jpeg",
@@ -49,6 +51,17 @@ function isReferenceMimeType(
   value: string,
 ): value is NormalizedReferenceImage["type"] {
   return SUPPORTED_REFERENCE_TYPES.has(value);
+}
+
+function getMaxActiveTasksPerUser(): number {
+  const configured = Number.parseInt(
+    process.env.IMAGE_GENERATION_MAX_ACTIVE_TASKS_PER_USER ?? "",
+    10,
+  );
+
+  return Number.isFinite(configured) && configured > 0
+    ? configured
+    : DEFAULT_MAX_ACTIVE_TASKS_PER_USER;
 }
 
 function normalizeRequest(body: GenerateBody): GenerateRequest | { error: string } {
@@ -392,6 +405,12 @@ export async function generateRoutes(app: FastifyInstance) {
       const queueTaskId = normalized.taskId ?? request.id;
       if (getImageQueueTask(queueTaskId)) {
         return reply.status(409).send({ error: "task already exists" });
+      }
+      const maxActiveTasksPerUser = getMaxActiveTasksPerUser();
+      if (countActiveImageQueueTasksForUser(user.id) >= maxActiveTasksPerUser) {
+        return reply.status(429).send({
+          error: `最多同时生成 ${maxActiveTasksPerUser} 个任务，请等待当前任务完成后再试`,
+        });
       }
 
       const queueTask = createImageQueueTask(queueTaskId, normalized.n, user.id);

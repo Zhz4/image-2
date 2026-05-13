@@ -103,10 +103,6 @@
             class="pointer-events-none absolute right-4 top-3 flex items-center gap-1 text-[10px] uppercase tracking-wider text-muted-foreground/50 opacity-0 transition-opacity duration-300 group-focus-within/composer:opacity-100"
           >
             <kbd class="rounded border bg-muted/40 px-1.5 py-0.5 font-mono text-[10px]">
-              Ctrl
-            </kbd>
-            <span>+</span>
-            <kbd class="rounded border bg-muted/40 px-1.5 py-0.5 font-mono text-[10px]">
               Enter
             </kbd>
           </div>
@@ -182,11 +178,14 @@
               :class="[
                 'group/send relative inline-flex size-9 items-center justify-center overflow-hidden rounded-md text-sm font-medium transition-all duration-300',
                 'outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50',
-                canSubmit
+                canSubmit && !activeTaskLimitReached
                   ? 'bg-linear-to-br from-fuchsia-500 via-violet-500 to-sky-500 text-white shadow-[0_4px_20px_-4px_rgba(168,85,247,0.6)] hover:-translate-y-0.5 hover:shadow-[0_6px_28px_-2px_rgba(168,85,247,0.75)] active:translate-y-0 active:scale-95'
-                  : 'cursor-not-allowed bg-muted text-muted-foreground/50',
+                  : activeTaskLimitReached
+                    ? 'cursor-not-allowed bg-muted text-muted-foreground/70'
+                    : 'cursor-not-allowed bg-muted text-muted-foreground/50',
               ]"
-              :title="canSubmit ? '生成（Ctrl + Enter）' : '请输入提示词'"
+              :aria-disabled="activeTaskLimitReached"
+              :title="submitTitle"
               @click="handleSubmit"
             >
               <span
@@ -196,7 +195,7 @@
                 style="opacity: 0"
               />
               <span
-                v-if="canSubmit"
+                v-if="canSubmit && !activeTaskLimitReached"
                 aria-hidden="true"
                 class="absolute inset-0 rounded-md opacity-0 transition-opacity duration-500 group-hover/send:opacity-100"
                 :style="{
@@ -207,13 +206,13 @@
               <el-icon
                 :class="[
                   'relative size-4 transition-transform duration-300',
-                  canSubmit ? 'group-hover/send:-translate-y-0.5' : '',
+                  canSubmit && !activeTaskLimitReached ? 'group-hover/send:-translate-y-0.5' : '',
                 ]"
               >
                 <Top />
               </el-icon>
               <span
-                v-if="canSubmit"
+                v-if="canSubmit && !activeTaskLimitReached"
                 aria-hidden="true"
                 class="pointer-events-none absolute inset-0 rounded-md ring-1 ring-inset ring-white/15"
               />
@@ -246,10 +245,14 @@ type Initial = Partial<Omit<GenerateRequest, "prompt">> & { prompt?: string };
 const props = defineProps<{
   initial?: Initial;
   resetKey?: number;
+  activeTaskCount?: number;
+  maxActiveTasks?: number;
 }>();
 
 const emit = defineEmits<{
   start: [taskId: string, request: GenerateRequest];
+  ready: [taskId: string, request: GenerateRequest];
+  fail: [taskId: string, request: GenerateRequest, message: string];
 }>();
 
 const DEFAULT_VALUES: GenerateRequest = {
@@ -279,6 +282,20 @@ const sparkleRef = ref<unknown>(null);
 const canSubmit = computed(
   () => form.prompt.trim().length > 0 && !uploadingReferenceImages.value,
 );
+const activeTaskLimitReached = computed(
+  () =>
+    typeof props.maxActiveTasks === "number" &&
+    props.maxActiveTasks > 0 &&
+    (props.activeTaskCount ?? 0) >= props.maxActiveTasks,
+);
+const activeTaskLimitMessage = computed(
+  () =>
+    `最多同时生成 ${props.maxActiveTasks ?? 2} 个任务，请等待当前任务完成后再试`,
+);
+const submitTitle = computed(() => {
+  if (!canSubmit.value) return "请输入提示词";
+  return activeTaskLimitReached.value ? activeTaskLimitMessage.value : "生成（Enter）";
+});
 
 let ctx: gsap.Context | undefined;
 let resetTimer: number | undefined;
@@ -418,7 +435,7 @@ function resolveElement(value: unknown): Element | null {
 }
 
 function handleKeydown(e: KeyboardEvent) {
-  if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+  if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
     e.preventDefault();
     void handleSubmit();
   }
@@ -426,6 +443,10 @@ function handleKeydown(e: KeyboardEvent) {
 
 async function handleSubmit() {
   if (!canSubmit.value) return;
+  if (activeTaskLimitReached.value) {
+    error.value = activeTaskLimitMessage.value;
+    return;
+  }
   error.value = null;
   const taskId = makeId();
   const request: GenerateRequest = {
@@ -445,14 +466,24 @@ async function handleSubmit() {
   }
   playSendShine();
   pulseSparkle();
+  emit("start", taskId, request);
+  form.prompt = "";
+  referenceImages.value = [];
 
   try {
-    const task = await createGenerateTask(request);
-    emit("start", task.taskId, request);
-    form.prompt = "";
-    referenceImages.value = [];
+    await createGenerateTask(request);
+    emit("ready", taskId, request);
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "创建任务失败";
+    const message = e instanceof Error ? e.message : "创建任务失败";
+    error.value = message;
+    emit("fail", taskId, request, message);
+
+    if (form.prompt.trim().length === 0 && referenceImages.value.length === 0) {
+      form.prompt = request.prompt;
+      referenceImages.value = request.referenceImages
+        ? [...request.referenceImages]
+        : [];
+    }
   }
 }
 
