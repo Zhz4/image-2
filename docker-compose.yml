@@ -1,0 +1,21 @@
+services:
+  backend:
+    build:
+      context: .
+      target: backend
+    env_file:
+      - ./backend/.env
+    environment:
+      PORT: 3002
+      NODE_ENV: production
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      target: frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
