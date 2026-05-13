@@ -58,8 +58,26 @@ function fetchAsStream(url: string): Promise<IncomingMessage> {
   });
 }
 
+type UploadImageSource = { url: string } | { b64_json: string } | { buffer: Buffer };
+
+function normalizePublicUrl(publicUrl: string): string {
+  return publicUrl.endsWith("/") ? publicUrl.slice(0, -1) : publicUrl;
+}
+
+export function isR2PublicObjectUrl(value: string): boolean {
+  const config = getR2Config();
+  const base = new URL(`${normalizePublicUrl(config.publicUrl)}/`);
+  const url = new URL(value);
+
+  return (
+    url.protocol === base.protocol &&
+    url.host === base.host &&
+    url.pathname.startsWith(base.pathname)
+  );
+}
+
 export async function uploadImageToR2(
-  source: { url: string } | { b64_json: string },
+  source: UploadImageSource,
   key: string,
   contentType: ImageMimeType,
 ): Promise<string> {
@@ -68,7 +86,9 @@ export async function uploadImageToR2(
   const body: Readable | Buffer =
     "url" in source
       ? await fetchAsStream(source.url)
-      : Buffer.from(source.b64_json, "base64");
+      : "buffer" in source
+        ? source.buffer
+        : Buffer.from(source.b64_json, "base64");
 
   await client.send(
     new PutObjectCommand({
@@ -79,8 +99,6 @@ export async function uploadImageToR2(
     }),
   );
 
-  const base = config.publicUrl.endsWith("/")
-    ? config.publicUrl.slice(0, -1)
-    : config.publicUrl;
+  const base = normalizePublicUrl(config.publicUrl);
   return `${base}/${key}`;
 }

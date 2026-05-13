@@ -15,7 +15,7 @@ export type GenerateRequest = {
 export type ReferenceImage = {
   name: string;
   type: string;
-  dataUrl: string;
+  url: string;
 };
 
 export type GenerateResponse = {

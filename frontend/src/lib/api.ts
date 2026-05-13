@@ -3,6 +3,7 @@ import type {
   GenerateQueueStatus,
   GenerateRequest,
   GenerateTaskMessage,
+  ReferenceImage,
 } from "@/lib/types";
 
 type GenerateTaskHandlers = {
@@ -22,6 +23,28 @@ export async function createGenerateTask(
     signal,
   });
   const json = (await res.json()) as CreateGenerateTaskResponse | { error: string };
+
+  if (!res.ok || "error" in json) {
+    const message = "error" in json ? json.error : `HTTP ${res.status}`;
+    throw new Error(message);
+  }
+
+  return json;
+}
+
+export async function uploadReferenceImage(
+  file: File,
+  signal?: AbortSignal,
+): Promise<ReferenceImage> {
+  const form = new FormData();
+  form.append("file", file);
+
+  const res = await fetch("/api/uploads/reference", {
+    method: "POST",
+    body: form,
+    signal,
+  });
+  const json = (await res.json()) as ReferenceImage | { error: string };
 
   if (!res.ok || "error" in json) {
     const message = "error" in json ? json.error : `HTTP ${res.status}`;

@@ -1,10 +1,12 @@
 import cors from "@fastify/cors";
+import multipart from "@fastify/multipart";
 import websocket from "@fastify/websocket";
 import dotenv from "dotenv";
 import Fastify from "fastify";
 import type { FastifyError } from "fastify";
 
 import { generateRoutes } from "./routes/generate.js";
+import { uploadRoutes } from "./routes/uploads.js";
 
 dotenv.config();
 
@@ -15,6 +17,7 @@ const app = Fastify({
 await app.register(cors, {
   origin: true,
 });
+await app.register(multipart);
 await app.register(websocket);
 
 app.setErrorHandler((error: FastifyError, request, reply) => {
@@ -30,6 +33,7 @@ app.setErrorHandler((error: FastifyError, request, reply) => {
 });
 
 app.get("/health", async () => ({ ok: true }));
+await app.register(uploadRoutes);
 await app.register(generateRoutes);
 
 const port = Number.parseInt(process.env.PORT ?? "3002", 10);

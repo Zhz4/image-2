@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { randomUUID } from "node:crypto";
-import { toFile } from "openai";
+import https from "node:https";
+import { toFile, type Uploadable } from "openai";
 import type { Images } from "openai/resources/images";
 
 import {
@@ -12,7 +13,11 @@ import {
   subscribeImageQueueTask,
 } from "../lib/image-queue.js";
 import { getImageModel, getOpenAI } from "../lib/openai.js";
-import { uploadImageToR2, type ImageMimeType } from "../lib/r2.js";
+import {
+  isR2PublicObjectUrl,
+  uploadImageToR2,
+  type ImageMimeType,
+} from "../lib/r2.js";
 import {
   FORMAT_OPTIONS,
   QUALITY_OPTIONS,
@@ -28,7 +33,7 @@ type GenerateBody = Partial<GenerateRequest>;
 type NormalizedReferenceImage = {
   name: string;
   type: "image/png" | "image/jpeg" | "image/webp";
-  buffer: Buffer;
+  url: string;
 };
 
 const MAX_REFERENCE_IMAGES = 4;
@@ -38,6 +43,12 @@ const SUPPORTED_REFERENCE_TYPES = new Set([
   "image/jpeg",
   "image/webp",
 ]);
+
+function isReferenceMimeType(
+  value: string,
+): value is NormalizedReferenceImage["type"] {
+  return SUPPORTED_REFERENCE_TYPES.has(value);
+}
 
 function normalizeRequest(body: GenerateBody): GenerateRequest | { error: string } {
   const taskId = typeof body.taskId === "string" ? body.taskId.trim() : undefined;
@@ -79,27 +90,25 @@ function normalizeReferenceImages(
 
   const normalized: NormalizedReferenceImage[] = [];
   for (const [index, image] of images.entries()) {
-    if (!image || typeof image.dataUrl !== "string") {
+    if (!image || typeof image.url !== "string") {
       return { error: `referenceImages[${index}] is invalid` };
     }
 
-    const match = /^data:(image\/(?:png|jpeg|webp));base64,([a-z0-9+/=]+)$/i.exec(
-      image.dataUrl,
-    );
-    if (!match) {
-      return {
-        error: "reference images must be PNG, JPG, or WEBP data URLs",
-      };
+    const url = image.url.trim();
+    try {
+      if (!isR2PublicObjectUrl(url)) {
+        return { error: "reference images must be uploaded first" };
+      }
+    } catch {
+      return { error: "reference images must be valid URLs" };
     }
 
-    const type = match[1].toLowerCase() as NormalizedReferenceImage["type"];
-    if (!SUPPORTED_REFERENCE_TYPES.has(type)) {
+    const type =
+      typeof image.type === "string"
+        ? image.type.toLowerCase()
+        : "";
+    if (!isReferenceMimeType(type)) {
       return { error: "reference images must be PNG, JPG, or WEBP" };
-    }
-
-    const buffer = Buffer.from(match[2], "base64");
-    if (buffer.byteLength > MAX_REFERENCE_IMAGE_BYTES) {
-      return { error: "each reference image must be 10MB or smaller" };
     }
 
     const ext = type === "image/jpeg" ? "jpg" : type.replace("image/", "");
@@ -108,10 +117,45 @@ function normalizeReferenceImages(
         ? image.name.trim().replace(/[\\/:*?"<>|]+/g, "-")
         : `reference-${index + 1}.${ext}`;
 
-    normalized.push({ name: safeName, type, buffer });
+    normalized.push({ name: safeName, type, url });
   }
 
   return normalized;
+}
+
+function fetchReferenceImageBuffer(url: string): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let total = 0;
+
+    const req = https.get(url, (res) => {
+      if (res.statusCode !== undefined && (res.statusCode < 200 || res.statusCode >= 300)) {
+        res.resume();
+        reject(new Error(`Failed to fetch reference image: HTTP ${res.statusCode}`));
+        return;
+      }
+
+      res.on("data", (chunk: Buffer) => {
+        total += chunk.byteLength;
+        if (total > MAX_REFERENCE_IMAGE_BYTES) {
+          req.destroy(new Error("each reference image must be 10MB or smaller"));
+          return;
+        }
+        chunks.push(chunk);
+      });
+      res.on("end", () => resolve(Buffer.concat(chunks)));
+      res.on("error", reject);
+    });
+
+    req.on("error", reject);
+  });
+}
+
+async function toOpenAIReferenceFile(
+  image: NormalizedReferenceImage,
+): Promise<Uploadable> {
+  const buffer = await fetchReferenceImageBuffer(image.url);
+  return toFile(buffer, image.name, { type: image.type });
 }
 
 function formatToMime(format: Format): ImageMimeType {
@@ -205,9 +249,7 @@ async function runImageGenerationTask(
         ...(await Promise.all(
           Array.from({ length: normalized.n }, async () => {
             const uploadables = await Promise.all(
-              referenceImages.map((image) =>
-                toFile(image.buffer, image.name, { type: image.type }),
-              ),
+              referenceImages.map((image) => toOpenAIReferenceFile(image)),
             );
             const editParams: Images.ImageEditParamsNonStreaming = {
               image: uploadables,

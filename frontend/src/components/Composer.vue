@@ -52,7 +52,7 @@
             class="group/reference relative h-16 w-16 shrink-0 overflow-hidden rounded-md border bg-muted"
           >
             <img
-              :src="image.dataUrl"
+              :src="image.url"
               :alt="image.name"
               class="h-full w-full object-cover"
             />
@@ -221,7 +221,7 @@ import { Close, MagicStick, Paperclip, Top } from "@element-plus/icons-vue";
 import gsap from "gsap";
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 
-import { createGenerateTask } from "@/lib/api";
+import { createGenerateTask, uploadReferenceImage } from "@/lib/api";
 import {
   FORMAT_OPTIONS,
   N_OPTIONS,
@@ -258,6 +258,7 @@ const focused = ref(false);
 const referenceImages = ref<ReferenceImage[]>(
   props.initial?.referenceImages ? [...props.initial.referenceImages] : [],
 );
+const uploadingReferenceImages = ref(false);
 
 const rootRef = ref<HTMLDivElement | null>(null);
 const auraRef = ref<HTMLDivElement | null>(null);
@@ -265,7 +266,9 @@ const fileInputRef = ref<HTMLInputElement | null>(null);
 const sendRef = ref<HTMLButtonElement | null>(null);
 const sendShineRef = ref<HTMLSpanElement | null>(null);
 const sparkleRef = ref<unknown>(null);
-const canSubmit = computed(() => form.prompt.trim().length > 0);
+const canSubmit = computed(
+  () => form.prompt.trim().length > 0 && !uploadingReferenceImages.value,
+);
 
 let ctx: gsap.Context | undefined;
 let resetTimer: number | undefined;
@@ -296,21 +299,6 @@ function resetForm() {
   error.value = null;
 }
 
-function readFileAsDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(reader.error);
-    reader.onload = () => {
-      if (typeof reader.result === "string") {
-        resolve(reader.result);
-      } else {
-        reject(new Error("无法读取参考图"));
-      }
-    };
-    reader.readAsDataURL(file);
-  });
-}
-
 async function handleReferenceFiles(e: Event) {
   const input = e.currentTarget as HTMLInputElement;
   const files = Array.from(input.files ?? []);
@@ -328,21 +316,27 @@ async function handleReferenceFiles(e: Event) {
 
   const allowedTypes = new Set(["image/png", "image/jpeg", "image/webp"]);
   const next: ReferenceImage[] = [];
+  uploadingReferenceImages.value = true;
 
-  for (const file of files.slice(0, remainingSlots)) {
-    if (!allowedTypes.has(file.type)) {
-      error.value = "参考图仅支持 PNG、JPG、WEBP";
-      continue;
+  try {
+    for (const file of files.slice(0, remainingSlots)) {
+      if (!allowedTypes.has(file.type)) {
+        error.value = "参考图仅支持 PNG、JPG、WEBP";
+        continue;
+      }
+      if (file.size > MAX_REFERENCE_IMAGE_BYTES) {
+        error.value = "单张参考图不能超过 10MB";
+        continue;
+      }
+      try {
+        next.push(await uploadReferenceImage(file));
+      } catch (e) {
+        error.value =
+          e instanceof Error ? e.message : "Failed to upload reference image";
+      }
     }
-    if (file.size > MAX_REFERENCE_IMAGE_BYTES) {
-      error.value = "单张参考图不能超过 10MB";
-      continue;
-    }
-    next.push({
-      name: file.name,
-      type: file.type,
-      dataUrl: await readFileAsDataUrl(file),
-    });
+  } finally {
+    uploadingReferenceImages.value = false;
   }
 
   if (files.length > remainingSlots) {

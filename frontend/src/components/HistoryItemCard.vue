@@ -254,7 +254,7 @@
                 <el-image
                   v-for="(image, index) in referenceImages"
                   :key="`${item.id}-reference-${index}`"
-                  :src="image.dataUrl"
+                  :src="image.url"
                   :alt="image.name || `Reference ${index + 1}`"
                   :preview-src-list="referencePreviewList"
                   :initial-index="index"
@@ -372,7 +372,7 @@ const safeIndex = computed(() =>
 const active = computed(() => item.value.images[safeIndex.value] ?? cover.value);
 const referenceImages = computed(() => item.value.referenceImages ?? []);
 const referencePreviewList = computed(() =>
-  referenceImages.value.map((image) => image.dataUrl),
+  referenceImages.value.map((image) => image.url),
 );
 const isFailed = computed(() => item.value.status === "failed");
 const failureReason = computed(() => item.value.errorMessage || "生成失败");
