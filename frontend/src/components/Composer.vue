@@ -43,7 +43,7 @@
         class="relative overflow-hidden rounded-2xl border bg-background/85 backdrop-blur-xl supports-backdrop-filter:bg-background/65"
       >
         <div
-          v-if="referenceImages.length > 0"
+          v-if="referenceImages.length > 0 || uploadingReferenceImages"
           class="flex gap-2 overflow-x-auto border-b border-border/60 px-4 py-3"
         >
           <div
@@ -65,6 +65,13 @@
               <el-icon class="size-3"><Close /></el-icon>
               <span class="sr-only">移除参考图</span>
             </button>
+          </div>
+          <div
+            v-if="uploadingReferenceImages"
+            class="flex h-16 w-16 shrink-0 items-center justify-center rounded-md border border-dashed border-primary/40 bg-primary/5 text-primary"
+            title="上传中"
+          >
+            <el-icon class="is-loading size-4"><Loading /></el-icon>
           </div>
         </div>
 
@@ -88,6 +95,7 @@
               @focus="focused = true"
               @blur="focused = false"
               @keydown="handleKeydown"
+              @paste="handlePaste"
             />
           </div>
           <p v-if="error" class="mt-1 pl-6 text-xs text-destructive">{{ error }}</p>
@@ -147,6 +155,8 @@
             <el-button
               circle
               text
+              :loading="uploadingReferenceImages"
+              :disabled="uploadingReferenceImages"
               title="添加参考图"
               class="group/attach !text-muted-foreground/70 transition-all"
               @click="fileInputRef?.click()"
@@ -217,7 +227,7 @@
 </template>
 
 <script setup lang="ts">
-import { Close, MagicStick, Paperclip, Top } from "@element-plus/icons-vue";
+import { Close, Loading, MagicStick, Paperclip, Top } from "@element-plus/icons-vue";
 import gsap from "gsap";
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 
@@ -303,7 +313,29 @@ async function handleReferenceFiles(e: Event) {
   const input = e.currentTarget as HTMLInputElement;
   const files = Array.from(input.files ?? []);
   input.value = "";
+  await uploadReferenceFiles(files);
+}
+
+async function handlePaste(e: ClipboardEvent) {
+  const clipboard = e.clipboardData;
+  if (!clipboard) return;
+
+  const files = Array.from(clipboard.items)
+    .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
+    .map((item) => item.getAsFile())
+    .filter((file): file is File => Boolean(file));
+
   if (files.length === 0) return;
+  e.preventDefault();
+  await uploadReferenceFiles(files);
+}
+
+async function uploadReferenceFiles(files: File[]) {
+  if (files.length === 0) return;
+  if (uploadingReferenceImages.value) {
+    error.value = "图片正在上传中";
+    return;
+  }
 
   const remainingSlots = Math.max(
     MAX_REFERENCE_IMAGES - referenceImages.value.length,
@@ -315,11 +347,13 @@ async function handleReferenceFiles(e: Event) {
   }
 
   const allowedTypes = new Set(["image/png", "image/jpeg", "image/webp"]);
+  const uploadFiles = files.slice(0, remainingSlots);
   const next: ReferenceImage[] = [];
+  error.value = null;
   uploadingReferenceImages.value = true;
 
   try {
-    for (const file of files.slice(0, remainingSlots)) {
+    for (const file of uploadFiles) {
       if (!allowedTypes.has(file.type)) {
         error.value = "参考图仅支持 PNG、JPG、WEBP";
         continue;
@@ -330,9 +364,9 @@ async function handleReferenceFiles(e: Event) {
       }
       try {
         next.push(await uploadReferenceImage(file));
-      } catch (e) {
+      } catch (err) {
         error.value =
-          e instanceof Error ? e.message : "Failed to upload reference image";
+          err instanceof Error ? (err as Error).message : "Failed to upload reference image";
       }
     }
   } finally {
