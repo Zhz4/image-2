@@ -1,16 +1,19 @@
-import { useState } from 'react'
-import { useStore } from '../store'
-import { useVersionCheck } from '../hooks/useVersionCheck'
-import HelpModal from './HelpModal'
+import { useState } from "react";
+import { useStore } from "../store";
+import { useVersionCheck } from "../hooks/useVersionCheck";
+import HelpModal from "./HelpModal";
 
 export default function Header() {
-  const setShowSettings = useStore((s) => s.setShowSettings)
-  const { hasUpdate, latestRelease, dismiss } = useVersionCheck()
-  const [showHelp, setShowHelp] = useState(false)
+  const setShowSettings = useStore((s) => s.setShowSettings);
+  const { hasUpdate, latestRelease, dismiss } = useVersionCheck();
+  const [showHelp, setShowHelp] = useState(false);
 
   return (
     <>
-      <header data-no-drag-select className="safe-area-top fixed top-0 left-0 right-0 z-40 bg-white/80 dark:bg-gray-950/80 backdrop-blur border-b border-gray-200 dark:border-white/[0.08]">
+      <header
+        data-no-drag-select
+        className="safe-area-top fixed top-0 left-0 right-0 z-40 bg-white/80 dark:bg-gray-950/80 backdrop-blur border-b border-gray-200 dark:border-white/[0.08]"
+      >
         <div className="safe-area-x safe-header-inner max-w-7xl mx-auto flex items-center justify-between">
           <div className="flex items-start gap-1">
             <h1 className="text-lg font-bold tracking-tight">
@@ -20,7 +23,7 @@ export default function Header() {
                 rel="noopener noreferrer"
                 className="text-gray-800 dark:text-gray-100 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
               >
-                GPT Image Playground
+                Smooth Image
               </a>
             </h1>
             {hasUpdate && latestRelease && (
@@ -84,10 +87,13 @@ export default function Header() {
           </div>
         </div>
       </header>
-      <div className="safe-area-top invisible pointer-events-none" aria-hidden="true">
+      <div
+        className="safe-area-top invisible pointer-events-none"
+        aria-hidden="true"
+      >
         <div className="safe-header-inner" />
       </div>
       {showHelp && <HelpModal onClose={() => setShowHelp(false)} />}
     </>
-  )
+  );
 }
