@@ -1,9 +1,10 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { initStore } from './store'
 import { useStore } from './store'
 import { buildSettingsFromUrlParams, clearUrlSettingParams, hasUrlSettingParams } from './lib/urlSettings'
 import { useDockerApiUrlMigrationNotice } from './hooks/useDockerApiUrlMigrationNotice'
 import Header from './components/Header'
+import PasswordGate, { PASSWORD_AUTH_STORAGE_KEY } from './components/PasswordGate'
 import SearchBar from './components/SearchBar'
 import TaskGrid from './components/TaskGrid'
 import InputBar from './components/InputBar'
@@ -16,10 +17,15 @@ import MaskEditorModal from './components/MaskEditorModal'
 import ImageContextMenu from './components/ImageContextMenu'
 
 export default function App() {
+  const [isUnlocked, setIsUnlocked] = useState(() => (
+    window.localStorage.getItem(PASSWORD_AUTH_STORAGE_KEY) === 'true'
+  ))
   const setSettings = useStore((s) => s.setSettings)
   useDockerApiUrlMigrationNotice()
 
   useEffect(() => {
+    if (!isUnlocked) return
+
     const searchParams = new URLSearchParams(window.location.search)
     const nextSettings = buildSettingsFromUrlParams(useStore.getState().settings, searchParams)
 
@@ -34,7 +40,7 @@ export default function App() {
     }
 
     initStore()
-  }, [setSettings])
+  }, [isUnlocked, setSettings])
 
   useEffect(() => {
     const preventPageImageDrag = (e: DragEvent) => {
@@ -46,6 +52,10 @@ export default function App() {
     document.addEventListener('dragstart', preventPageImageDrag)
     return () => document.removeEventListener('dragstart', preventPageImageDrag)
   }, [])
+
+  if (!isUnlocked) {
+    return <PasswordGate onUnlock={() => setIsUnlocked(true)} />
+  }
 
   return (
     <>
