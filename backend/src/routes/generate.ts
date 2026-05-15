@@ -4,7 +4,7 @@ import https from "node:https";
 import { toFile, type Uploadable } from "openai";
 import type { Images } from "openai/resources/images";
 
-import { getRequiredUser, getUserFromRequest, requireAuth } from "../lib/auth.js";
+const ANONYMOUS_OWNER_ID = "anonymous";
 import {
   addTrackedImageGeneration,
   countActiveImageQueueTasksForUser,
@@ -16,6 +16,7 @@ import {
 } from "../lib/image-queue.js";
 import { getImageModel, getOpenAI } from "../lib/openai.js";
 import {
+  getR2ObjectBufferByKey,
   getR2PublicObjectKey,
   uploadImageToR2,
   type ImageMimeType,
@@ -96,7 +97,6 @@ function normalizeRequest(body: GenerateBody): GenerateRequest | { error: string
 
 function normalizeReferenceImages(
   images: ReferenceImage[] | undefined,
-  ownerId: string,
 ): NormalizedReferenceImage[] | { error: string } {
   if (!Array.isArray(images) || images.length === 0) return [];
   if (images.length > MAX_REFERENCE_IMAGES) {
@@ -110,17 +110,13 @@ function normalizeReferenceImages(
     }
 
     const url = image.url.trim();
-    let objectKey: string | null;
     try {
-      objectKey = getR2PublicObjectKey(url);
+      const objectKey = getR2PublicObjectKey(url);
       if (!objectKey) {
         return { error: "reference images must be uploaded first" };
       }
     } catch {
       return { error: "reference images must be valid URLs" };
-    }
-    if (!objectKey.startsWith(`references/${ownerId}/`)) {
-      return { error: "reference images must belong to the current user" };
     }
 
     const type =
@@ -144,6 +140,9 @@ function normalizeReferenceImages(
 }
 
 function fetchReferenceImageBuffer(url: string): Promise<Buffer> {
+  const objectKey = getR2PublicObjectKey(url);
+  if (objectKey) return getR2ObjectBufferByKey(objectKey, MAX_REFERENCE_IMAGE_BYTES);
+
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     let total = 0;
@@ -176,6 +175,15 @@ async function toOpenAIReferenceFile(
 ): Promise<Uploadable> {
   const buffer = await fetchReferenceImageBuffer(image.url);
   return toFile(buffer, image.name, { type: image.type });
+}
+
+function normalizeMaskImage(
+  image: ReferenceImage | undefined,
+): NormalizedReferenceImage | undefined | { error: string } {
+  if (!image) return undefined;
+  const normalized = normalizeReferenceImages([image]);
+  if ("error" in normalized) return normalized;
+  return normalized[0];
 }
 
 function formatToMime(format: Format): ImageMimeType {
@@ -257,10 +265,11 @@ function sendTask(
   return task.status !== "completed" && task.status !== "failed";
 }
 
-async function runImageGenerationTask(
+export async function runImageGenerationTask(
   taskId: string,
   normalized: GenerateRequest,
   referenceImages: NormalizedReferenceImage[],
+  maskImage?: NormalizedReferenceImage,
 ) {
   try {
     const openai = getOpenAI();
@@ -275,8 +284,12 @@ async function runImageGenerationTask(
             const uploadables = await Promise.all(
               referenceImages.map((image) => toOpenAIReferenceFile(image)),
             );
+            const mask = maskImage
+              ? await toOpenAIReferenceFile(maskImage)
+              : undefined;
             const editParams: Images.ImageEditParamsNonStreaming = {
               image: uploadables,
+              ...(mask ? { mask } : {}),
               model,
               prompt: normalized.prompt,
               size: normalized.size,
@@ -339,28 +352,20 @@ export async function generateRoutes(app: FastifyInstance) {
     "/api/generate/ws/:taskId",
     { websocket: true },
     async (socket, request) => {
-      const user = await getUserFromRequest(request);
-      if (!user) {
-        socket.close(1008, "authentication required");
-        return;
-      }
-
       const taskId = request.params.taskId;
-      const shouldSubscribe = sendTask(socket, taskId, user.id);
+      const shouldSubscribe = sendTask(socket, taskId, ANONYMOUS_OWNER_ID);
       if (!shouldSubscribe) {
         socket.close();
         return;
       }
 
       const unsubscribe = subscribeImageQueueTask(taskId, (task) => {
-        socket.send(
-          JSON.stringify({
-            ...task,
-            error: task.errorMessage,
-            images: task.result?.images,
-            created: task.result?.created,
-          }),
-        );
+        socket.send(JSON.stringify({
+          ...task,
+          error: task.errorMessage,
+          images: task.result?.images,
+          created: task.result?.created,
+        }));
         if (task.status === "completed" || task.status === "failed") {
           unsubscribe();
           socket.close();
@@ -374,11 +379,9 @@ export async function generateRoutes(app: FastifyInstance) {
 
   app.get<{ Params: { taskId: string } }>(
     "/api/generate/status/:taskId",
-    { preHandler: requireAuth },
     async (request, reply) => {
-      const user = getRequiredUser(request);
       const task = getImageQueueTask(request.params.taskId);
-      if (!task || task.ownerId !== user.id) {
+      if (!task) {
         return reply.status(404).send({ error: "task not found" });
       }
       return reply.send(task);
@@ -387,19 +390,18 @@ export async function generateRoutes(app: FastifyInstance) {
 
   app.post<{ Body: GenerateBody }>(
     "/api/generate",
-    { preHandler: requireAuth },
     async (request, reply) => {
-      const user = getRequiredUser(request);
       const normalized = normalizeRequest(request.body ?? {});
       if ("error" in normalized) {
         return reply.status(400).send({ error: normalized.error });
       }
-      const referenceImages = normalizeReferenceImages(
-        request.body?.referenceImages,
-        user.id,
-      );
+      const referenceImages = normalizeReferenceImages(request.body?.referenceImages);
       if ("error" in referenceImages) {
         return reply.status(400).send({ error: referenceImages.error });
+      }
+      const maskImage = normalizeMaskImage(request.body?.maskImage);
+      if (maskImage && "error" in maskImage) {
+        return reply.status(400).send({ error: maskImage.error });
       }
 
       const queueTaskId = normalized.taskId ?? request.id;
@@ -407,14 +409,14 @@ export async function generateRoutes(app: FastifyInstance) {
         return reply.status(409).send({ error: "task already exists" });
       }
       const maxActiveTasksPerUser = getMaxActiveTasksPerUser();
-      if (countActiveImageQueueTasksForUser(user.id) >= maxActiveTasksPerUser) {
+      if (countActiveImageQueueTasksForUser(ANONYMOUS_OWNER_ID) >= maxActiveTasksPerUser) {
         return reply.status(429).send({
           error: `最多同时生成 ${maxActiveTasksPerUser} 个任务，请等待当前任务完成后再试`,
         });
       }
 
-      const queueTask = createImageQueueTask(queueTaskId, normalized.n, user.id);
-      void runImageGenerationTask(queueTaskId, normalized, referenceImages);
+      const queueTask = createImageQueueTask(queueTaskId, normalized.n, ANONYMOUS_OWNER_ID);
+      void runImageGenerationTask(queueTaskId, normalized, referenceImages, maskImage);
 
       return reply.send({
         taskId: queueTask.id,

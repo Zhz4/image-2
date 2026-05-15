@@ -1,4 +1,4 @@
-import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
 import { Readable } from "node:stream";
 import https from "node:https";
 import type { IncomingMessage } from "node:http";
@@ -114,4 +114,46 @@ export async function uploadImageToR2(
 
   const base = normalizePublicUrl(config.publicUrl);
   return `${base}/${key}`;
+}
+
+export async function getR2ObjectByKey(key: string) {
+  const { client, config } = getR2();
+  const result = await client.send(
+    new GetObjectCommand({
+      Bucket: config.bucketName,
+      Key: key,
+    }),
+  );
+
+  if (!result.Body) {
+    throw new Error("R2 object has no body");
+  }
+
+  return {
+    body: result.Body as NodeJS.ReadableStream,
+    contentType: result.ContentType,
+    contentLength: result.ContentLength,
+    etag: result.ETag,
+    lastModified: result.LastModified,
+  };
+}
+
+export async function getR2ObjectBufferByKey(
+  key: string,
+  maxBytes?: number,
+): Promise<Buffer> {
+  const object = await getR2ObjectByKey(key);
+  const chunks: Buffer[] = [];
+  let total = 0;
+
+  for await (const chunk of object.body as AsyncIterable<Buffer | Uint8Array | string>) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    total += buffer.byteLength;
+    if (maxBytes != null && total > maxBytes) {
+      throw new Error("R2 object is too large");
+    }
+    chunks.push(buffer);
+  }
+
+  return Buffer.concat(chunks);
 }

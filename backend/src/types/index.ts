@@ -10,6 +10,7 @@ export type GenerateRequest = {
   format: Format;
   n: number;
   referenceImages?: ReferenceImage[];
+  maskImage?: ReferenceImage;
 };
 
 export type ReferenceImage = {

@@ -1,7 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { randomUUID } from "node:crypto";
 
-import { getRequiredUser, requireAuth } from "../lib/auth.js";
 import { uploadImageToR2, type ImageMimeType } from "../lib/r2.js";
 
 const MAX_REFERENCE_IMAGE_BYTES = 10 * 1024 * 1024;
@@ -25,8 +24,7 @@ function sanitizeFilename(filename: string, fallback: string): string {
 }
 
 export async function uploadRoutes(app: FastifyInstance) {
-  app.post("/api/uploads/reference", { preHandler: requireAuth }, async (request, reply) => {
-    const user = getRequiredUser(request);
+  app.post("/api/uploads/reference", async (request, reply) => {
     let file: Awaited<ReturnType<typeof request.file>>;
 
     try {
@@ -70,7 +68,7 @@ export async function uploadRoutes(app: FastifyInstance) {
     }
 
     const ext = imageExtension(contentType);
-    const key = `references/${user.id}/${randomUUID()}.${ext}`;
+    const key = `references/shared/${randomUUID()}.${ext}`;
     const url = await uploadImageToR2({ buffer }, key, contentType);
 
     return reply.send({

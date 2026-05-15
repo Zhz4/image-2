@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Get-ChildItem -Path \"e:\\\\github\\\\image-2\\\\frontend\" -Recurse -Force)",
+      "Bash(Select-Object -First 50)",
+      "Bash(Format-Table FullName)",
+      "Bash(Get-ChildItem -Path \"e:\\\\github\\\\image-2\\\\backend\" -Recurse -Directory)",
+      "Bash(Select-Object -ExpandProperty FullName)",
+      "Bash(Sort-Object)",
+      "Bash(Remove-Item -Force \"e:\\\\github\\\\image-2\\\\backend\\\\src\\\\routes\\\\auth.ts\", \"e:\\\\github\\\\image-2\\\\backend\\\\src\\\\lib\\\\auth.ts\", \"e:\\\\github\\\\image-2\\\\backend\\\\src\\\\lib\\\\jwt.ts\", \"e:\\\\github\\\\image-2\\\\backend\\\\src\\\\lib\\\\password.ts\", \"e:\\\\github\\\\image-2\\\\backend\\\\src\\\\lib\\\\users.ts\", \"e:\\\\github\\\\image-2\\\\backend\\\\src\\\\lib\\\\d1.ts\")",
+      "Bash(Remove-Item -Force -Recurse \"e:\\\\github\\\\image-2\\\\backend\\\\migrations\")",
+      "Bash(rm -f \"e:/github/image-2/backend/src/routes/auth.ts\" \"e:/github/image-2/backend/src/lib/auth.ts\" \"e:/github/image-2/backend/src/lib/jwt.ts\" \"e:/github/image-2/backend/src/lib/password.ts\" \"e:/github/image-2/backend/src/lib/users.ts\" \"e:/github/image-2/backend/src/lib/d1.ts\")",
+      "Bash(rm -rf \"e:/github/image-2/backend/migrations\")"
+    ]
+  }
+}
